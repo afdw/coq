@@ -66,7 +66,80 @@ let init_toplevel { parse_extra; init_extra; usage; initial_args } =
   let customstate = init_extra ~opts customopts injections in
   opts, customopts, customstate
 
+module Trace = struct
+  type t = {
+    sub_filenames : string list;
+    declarations : Vernacentries.Declaration.t list;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
 let start_coq custom =
+  Flags.tracing_interactive := Sys.getenv_opt "TRACING_INTERACTIVE" |> Option.has_some;
+  Flags.tracing_file := Sys.getenv_opt "TRACING_FILE";
+  Flags.tracing := !Flags.tracing_interactive || (!Flags.tracing_file |> Option.has_some);
+  Flags.tracing_split := Sys.getenv_opt "TRACING_SPLIT" |> Option.has_some;
+  Flags.tracing_compress := Sys.getenv_opt "TRACING_COMPRESS" |> Option.has_some;
+  Flags.tracing_low_level := Sys.getenv_opt "TRACING_LOW_LEVEL" |> Option.has_some;
+  Flags.tracing_no_event := Sys.getenv_opt "TRACING_NO_EVENT" |> Option.has_some;
+  at_exit (fun () ->
+    if !Vernacentries.current_name |> Option.has_some then
+      Vernacentries.end_proof Vernacentries.Declaration.Fail;
+    if !Flags.tracing_interactive then
+      Feedback.msg_info Pp.(str "Collected declarations:" ++ spc () ++ int (!Vernacentries.declarations |> List.length));
+    match !Flags.tracing_file with
+    | None -> ()
+    | Some filename ->
+      Util.modify_file_with_lock ~filename ~f:(fun old_contents ->
+        let trace =
+          if old_contents = "" then
+            {
+              Trace.sub_filenames = [];
+              Trace.declarations = [];
+            }
+          else
+            let old_contents =
+              if !Flags.tracing_compress && not !Flags.tracing_split
+              then Zstd.decompress (Zstd.get_decompressed_size old_contents) old_contents
+              else old_contents in
+            match old_contents |> Yojson.Safe.from_string |> Trace.of_yojson with
+            | Ok trace -> trace
+            | Error error -> raise (Failure error) in
+        let trace =
+          if !Flags.tracing_split then
+            let sub_filename =
+              Printf.sprintf "%s-%d-%s%s"
+                (Filename.chop_suffix filename ".json")
+                (List.length trace.sub_filenames)
+                !Flags.tracing_sub_suffix
+                (if !Flags.tracing_compress then ".json.zst" else ".json") in
+            let sub_trace = {
+              Trace.sub_filenames = [];
+              Trace.declarations = !Vernacentries.declarations;
+            } in
+            let sub_contents = (sub_trace |> Trace.to_yojson |> Yojson.Safe.pretty_to_string) ^ "\n" in
+            let sub_contents =
+              if !Flags.tracing_compress
+              then Zstd.compress ~level:15 sub_contents
+              else sub_contents in
+            Out_channel.with_open_text sub_filename (fun oc -> output_string oc sub_contents);
+            {
+              trace with
+              Trace.sub_filenames = trace.sub_filenames @ [Filename.basename sub_filename];
+            }
+          else
+            {
+              trace with
+              Trace.declarations = trace.declarations @ !Vernacentries.declarations;
+            } in
+        let new_contents = (trace |> Trace.to_yojson |> Yojson.Safe.pretty_to_string) ^ "\n" in
+        let new_contents =
+          if !Flags.tracing_compress && not !Flags.tracing_split
+          then Zstd.compress  ~level:15 new_contents
+          else new_contents in
+        new_contents
+      )
+  );
+
   let init_feeder = Feedback.add_feeder Coqloop.coqloop_feed in
   (* Init phase *)
   let opts, custom_opts, state =

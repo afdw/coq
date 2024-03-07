@@ -164,3 +164,5 @@ val set_temporary_memory : unit -> ('a -> 'a) * (unit -> 'a)
 (** A trick which can typically be used to store on the fly the
    computation of values in the "when" clause of a "match" then
    retrieve the evaluated result in the r.h.s of the clause *)
+
+val modify_file_with_lock : filename:string -> f:(string -> string) -> unit

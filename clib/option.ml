@@ -76,6 +76,19 @@ let append o1 o2 =
   | Some _ -> o1
   | None  -> o2
 
+exception Conflict
+
+(** [combine x y] is same as [append x y] except that it fails
+    in case of [combine (Some a) (Some b)]. *)
+let combine o1 o2 =
+  match o1, o2 with
+  | Some v1, Some v2 -> raise Conflict
+  | Some v1, None -> Some v1
+  | None, Some v2 -> Some v2
+  | None, None -> None
+
+let assign r v =
+  r := combine !r (Some v)
 
 (** {6 "Iterators"} ***)
 
@@ -145,6 +158,10 @@ let cata f a = function
 let default a = function
   | Some y -> y
   | _ -> a
+
+let to_list = function
+  | Some x -> [x]
+  | None -> []
 
 (** {6 Smart operations} *)
 
