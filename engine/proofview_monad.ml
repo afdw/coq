@@ -141,6 +141,21 @@ module Info = struct
     | Message m -> Message m
 end
 
+module Event = struct
+  type 'a t =
+    | Sequence of {elements : 'a t list}
+    | Dispatch of {branches : 'a t list}
+    | Tactic of {tactic : 'a; details : 'a t}
+    | Message of {message : string}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  let rec of_trace f = function
+    | Info.Sequence brs -> Sequence {elements = brs |> List.map (of_trace f)}
+    | Info.Dispatch brs -> Dispatch {branches = brs |> List.map (of_trace f)}
+    | Info.Tactic (m, c) -> Tactic {tactic = f m; details = of_trace f c}
+    | Info.Message m -> Message {message = m () |> Pp.simple_string_of_ppcmds}
+end
+
 module StateStore = Store.Make()
 
 (* let (set_state, get_state) = StateDyn.Easy.make_dyn "goal_state" *)

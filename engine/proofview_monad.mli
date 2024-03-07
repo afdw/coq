@@ -80,6 +80,17 @@ module Info : sig
   val collapse : int -> trace -> trace
 end
 
+module Event : sig
+  type 'a t =
+    | Sequence of {elements : 'a t list}
+    | Dispatch of {branches : 'a t list}
+    | Tactic of {tactic : 'a; details : 'a t}
+    | Message of {message : string}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  val of_trace : ((unit -> Pp.t) -> 'a) -> Info.trace -> 'a t
+end
+
 module StateStore : Store.S
 type goal = Evar.t
 type goal_with_state

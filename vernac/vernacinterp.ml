@@ -215,6 +215,7 @@ let interp_entry ?(verbosely=true) ~st entry =
 let interp_qed_delayed_proof ~proof ~st ~control (CAst.{loc; v = pe } as e) : Vernacstate.Interp.t =
   let cmd = CAst.make ?loc { control; expr = VernacSynPure (VernacEndProof pe); attrs = [] } in
   let CAst.{ loc; v = entry } = Synterp.synterp_control cmd in
+  Vernacentries.end_proof (match pe with Admitted -> Vernacentries.Declaration.Admitted | Proved _ -> Vernacentries.Declaration.Proved);
   let control = entry.control in
   NewProfile.profile "interp-delayed-qed" (fun () ->
       interp_gen ~verbosely:false ~st
