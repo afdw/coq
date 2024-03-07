@@ -88,6 +88,7 @@ module CInfo : sig
   (* Used only in RecLemmas, may disappear from public API *)
   val get_typ : 'constr t -> 'constr
 
+  val get_name : 'constr t -> Id.t
 end
 
 (** Information for a declaration, interactive or not, includes

@@ -27,6 +27,26 @@ let pr_bullet b =
   | Star n -> Pp.(str (String.make n '*'))
   | Plus n -> Pp.(str (String.make n '+'))
 
+let string_of_bullet b =
+  match b with
+  | Dash n -> String.make n '-'
+  | Star n -> String.make n '*'
+  | Plus n -> String.make n '+'
+
+let bullet_of_string b =
+  match b.[0] with
+  | '-' -> Dash (String.length b)
+  | '*' -> Star (String.length b)
+  | '+' -> Plus (String.length b)
+  | _ -> assert false
+
+let to_yojson b =
+  b |> string_of_bullet |> [%to_yojson: string]
+
+let of_yojson j =
+  try
+    j |> [%of_yojson: string] |> Result.map bullet_of_string
+  with _ -> Error "bullet"
 
 type behavior = {
   name : string;
