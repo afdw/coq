@@ -15,6 +15,25 @@ Require Import Ltac.
 
 Notation "A -> B" := (forall (_ : A), B) : type_scope.
 
+(* Begin moved. *)
+Inductive eq (A:Type) (x:A) : A -> Prop :=
+    eq_refl : x = x :>A
+
+where "x = y :> A" := (@eq A x y) : type_scope.
+
+Arguments eq {A} x _.
+Arguments eq_refl {A x} , [A] x.
+
+Arguments eq_ind [A] x P _ y _ : rename.
+Arguments eq_rec [A] x P _ y _ : rename.
+Arguments eq_rect [A] x P _ y _ : rename.
+
+Register eq as core.eq.type.
+Register eq_refl as core.eq.refl.
+Register eq_ind as core.eq.ind.
+Register eq_rect as core.eq.rect.
+(* End moved. *)
+
 (** * Propositional connectives *)
 
 (** [True] is the always true proposition *)
@@ -36,6 +55,12 @@ Definition not (A:Prop) := A -> False.
 Notation "~ x" := (not x) : type_scope.
 
 Register not as core.not.type.
+
+(* Begin moved. *)
+Notation "x = y" := (eq x y) : type_scope.
+Notation "x <> y  :> T" := (~ x = y :>T) : type_scope.
+Notation "x <> y" := (~ (x = y)) : type_scope.
+(* End moved. *)
 
 (** Negation of a type in [Type] *)
 
@@ -374,21 +399,7 @@ End universal_quantification.
     as it expresses that [x] and [y] are equal iff every property on
     [A] which is true of [x] is also true of [y] *)
 
-Inductive eq (A:Type) (x:A) : A -> Prop :=
-    eq_refl : x = x :>A
-
-where "x = y :> A" := (@eq A x y) : type_scope.
-
-Arguments eq {A} x _.
-Arguments eq_refl {A x} , [A] x.
-
-Arguments eq_ind [A] x P _ y _ : rename.
-Arguments eq_rec [A] x P _ y _ : rename.
-Arguments eq_rect [A] x P _ y _ : rename.
-
-Notation "x = y" := (eq x y) : type_scope.
-Notation "x <> y  :> T" := (~ x = y :>T) : type_scope.
-Notation "x <> y" := (~ (x = y)) : type_scope.
+(* Moved to the top. *)
 
 #[global]
 Hint Resolve I conj or_introl or_intror : core.
@@ -397,10 +408,7 @@ Hint Resolve eq_refl: core.
 #[global]
 Hint Resolve ex_intro ex_intro2: core.
 
-Register eq as core.eq.type.
-Register eq_refl as core.eq.refl.
-Register eq_ind as core.eq.ind.
-Register eq_rect as core.eq.rect.
+(* Moved to the top. *)
 
 Section Logic_lemmas.
 

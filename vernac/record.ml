@@ -849,7 +849,7 @@ let declare_structure { Record_decl.mie; default_dep_elim; primitive_proj; impls
     let () = if is_coercion then ComCoercion.try_add_new_coercion build ~local:false ~reversible:false in
     let struc = Structure.make (Global.env ()) rsp projections in
     let () = declare_structure_entry struc in
-    GlobRef.IndRef rsp
+    (GlobRef.IndRef rsp, [build])
   in
   List.mapi map records, []
 
@@ -906,7 +906,7 @@ let declare_class_constant ~univs paramimpls params data =
     meth_info = None;
     meth_const = Some proj_cst;
   } in
-  [cref], [m]
+  [cref, [GlobRef.ConstRef proj_cst]], [m]
 
 (** [declare_class] will prepare and declare a [Class]. This is done in
    2 steps:
@@ -1032,12 +1032,12 @@ let declare_existing_class g =
     or subinstances. *)
 
 let definition_structure udecl kind ~template ~cumulative ~poly ~primitive_proj
-    finite (records : Ast.t list) : GlobRef.t list =
+    finite (records : Ast.t list) : (GlobRef.t * GlobRef.t list) list =
   let impargs, params, univs, variances, projections_kind, data, indlocs =
     let definitional = kind_class kind = DefClass in
     pre_process_structure ~definitional udecl kind ~poly records
   in
-  let inds, def = match kind_class kind with
+  let glob_refs, def = match kind_class kind with
     | DefClass -> declare_class_constant ~univs impargs params data
     | RecordClass | NotClass ->
       (* remove the following block after deprecation phase
@@ -1050,8 +1050,8 @@ let definition_structure udecl kind ~template ~cumulative ~poly ~primitive_proj
           impargs params template ~projections_kind ~indlocs data in
       declare_structure structure
   in
-  if kind_class kind <> NotClass then declare_class ~univs params inds def data;
-  inds
+  if kind_class kind <> NotClass then declare_class ~univs params (glob_refs |> List.map fst) def data;
+  glob_refs
 
 module Internal = struct
   type nonrec projection_flags = Data.projection_flags = {

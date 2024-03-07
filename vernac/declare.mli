@@ -88,6 +88,7 @@ module CInfo : sig
   (* Used only in RecLemmas, may disappear from public API *)
   val get_typ : 'constr t -> 'constr
 
+  val get_name : 'constr t -> Id.t
 end
 
 (** Information for a declaration, interactive or not, includes
@@ -142,7 +143,7 @@ val declare_mutually_recursive
   -> possible_indexes:lemma_possible_guards option
   -> ?using:Vernacexpr.section_subset_expr
   -> unit
-  -> Names.GlobRef.t list
+  -> Names.GlobRef.t list * (Constr.t CInfo.t * Constr.t) list
 
 (** {2 Declaration of interactive constants }  *)
 

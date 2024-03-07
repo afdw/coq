@@ -8,6 +8,8 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+open Util
+
 (* The different kinds of blocks are:
    \begin{description}
    \item[hbox:] Horizontal block no line breaking;
@@ -207,6 +209,27 @@ let string_of_ppcmds c =
   Format.fprintf Format.str_formatter "@[%a@]" pp_with c;
   Format.flush_str_formatter ()
 
+let simple_string_of_ppcmds c =
+  let buffer = Buffer.create 512 in
+  let rec aux f = function
+    | Ppcmd_empty -> ()
+    | Ppcmd_string s -> Printf.bprintf buffer "%s" s
+    | Ppcmd_glue cs -> List.iter (aux f) cs
+    | Ppcmd_box (btype, c) ->
+      aux (
+        match btype with
+        | Pp_hbox -> false
+        | Pp_vbox _ -> true
+        | Pp_hvbox _ -> false
+        | Pp_hovbox _ -> false
+      ) c
+    | Ppcmd_tag (_, c) -> (aux f) c
+    | Ppcmd_print_break (n, _) -> Printf.bprintf buffer "%s" (if f then "\n" else String.make n ' ')
+    | Ppcmd_force_newline -> Printf.bprintf buffer "\n"
+    | Ppcmd_comment ss -> List.iter (Printf.bprintf buffer "%s") ss in
+  aux false c;
+  buffer |> Buffer.to_bytes |> String.of_bytes
+
 (* Copy paste from Util *)
 
 let pr_comma () = str "," ++ spc ()
@@ -361,3 +384,6 @@ let rec flatten pp =
   | Ppcmd_box (block, pp) -> Ppcmd_box (block, flatten pp)
   | Ppcmd_tag (tag, pp) -> Ppcmd_tag (tag, flatten pp)
   | p -> p
+
+let to_yojson = simple_string_of_ppcmds %> [%to_yojson: string]
+let of_yojson = [%of_yojson: string] %> Result.map str

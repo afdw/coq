@@ -18,6 +18,10 @@
 
 Require Import Datatypes Specif Decimal.
 
+(* Begin added. *)
+Require Import Notations.
+(* End added. *)
+
 (** Unsigned integers are just lists of digits.
     For instance, sixteen is (D1 (D0 Nil)) *)
 

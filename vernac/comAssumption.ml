@@ -219,7 +219,14 @@ let do_assumptions ~program_mode ~poly ~scope ~kind ?user_warns ~inline l =
   let coercions, ctx = local_binders_of_decls ~poly l in
   let sigma, ctx = interp_context_gen ~program_mode ~kind ~share:true ~autoimp_enable:true ~coercions env sigma ctx in
   let univs = Evd.check_univ_decl ~poly sigma udecl in
-  declare_context ~try_global_assum_as_instance:false ~scope ~univs ?user_warns ~inline ctx
+  declare_context ~try_global_assum_as_instance:false ~scope ~univs ?user_warns ~inline ctx;
+  ctx |> List.iter (fun (name, _, c, _) ->
+    ComDefinition.declarations := !ComDefinition.declarations @ [ComDefinition.Declaration.{
+      path = Libnames.make_path (Global.current_dirpath ()) name;
+      type_ = ComDefinition.print_constr env sigma (EConstr.of_constr c);
+      kind = Assumption;
+    }]
+  )
 
 let do_context ~program_mode ~poly ctx =
   let sec = Lib.sections_are_opened () in

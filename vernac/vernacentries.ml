@@ -626,6 +626,8 @@ let start_lemma_com ~typing_flags ~program_mode ~poly ~scope ?clearbody ~kind ?u
   let mut_analysis = RecLemmas.look_for_possibly_mutual_statements evd thms in
   let evd = Evd.minimize_universes evd in
   let info = Declare.Info.make ?hook ~poly ~scope ?clearbody ~kind ~udecl ?typing_flags ?user_warns () in
+  let r =
+  begin
   match mut_analysis with
   | RecLemmas.NonMutual thm ->
     let thm = Declare.CInfo.to_constr evd thm in
@@ -635,6 +637,13 @@ let start_lemma_com ~typing_flags ~program_mode ~poly ~scope ?clearbody ~kind ?u
     let cinfo = List.map (Declare.CInfo.to_constr evd) cinfo in
     let evd = post_check_evd ~udecl ~poly evd in
     Declare.Proof.start_mutual_with_initialization ~info ~cinfo evd ~mutual_info ?using (Some possible_guards)
+  end in
+  let thm_name = List.hd thms |> Declare.CInfo.get_name in
+  let thm_type = List.hd thms |> Declare.CInfo.get_typ |> Evarutil.nf_evar evd in
+  Option.assign ComDefinition.current_name thm_name;
+  Option.assign ComDefinition.current_type thm_type;
+  assert (!ComDefinition.current_steps = []);
+  r
 
 let vernac_definition_hook ~canonical_instance ~local ~poly ~reversible = let open Decls in function
 | Coercion ->
@@ -1033,13 +1042,35 @@ let vernac_inductive ~atts kind indl =
   let open Preprocessed_Mind_decl in
   let indl_for_glob, decl = preprocess_inductive_decl ~atts kind indl in
   dump_inductive indl_for_glob decl;
+  let l =
   match decl with
   | Record { flags = { template; udecl; cumulative; poly; finite; }; kind; primitive_proj; records } ->
-    let _ : _ list =
-      Record.definition_structure ~template udecl kind ~cumulative ~poly ~primitive_proj finite records in
-    ()
+    Record.definition_structure ~template udecl kind ~cumulative ~poly ~primitive_proj finite records
   | Inductive { flags = { template; udecl; cumulative; poly; finite; }; typing_flags; private_ind; uniform; inductives } ->
     ComInductive.do_mutual_inductive ~template udecl inductives ~cumulative ~poly ?typing_flags ~private_ind ~uniform finite
+      |> List.map (fun ind ->
+        let env = Global.env () in
+        let (_mib, mip) = Inductive.lookup_mind_specif env ind in
+        (GlobRef.IndRef ind, List.init (Array.length mip.mind_user_lc) (fun i -> GlobRef.ConstructRef (ind, i + 1)))
+      ) in
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
+  l |> List.iter (fun (ind_glob_ref, constructor_glob_refs) ->
+    let sigma, ind_c = Evd.fresh_global env sigma ind_glob_ref in
+    ComDefinition.declarations := !ComDefinition.declarations @ [ComDefinition.Declaration.{
+      path = Nametab.path_of_global ind_glob_ref;
+      type_ = ComDefinition.print_constr env sigma (Retyping.get_type_of_constr env (ind_c |> EConstr.to_constr sigma) |> EConstr.of_constr);
+      kind = Inductive;
+    }];
+    constructor_glob_refs |> List.iter (fun constructor_glob_ref ->
+      let sigma, constructor_c = Evd.fresh_global env sigma constructor_glob_ref in
+      ComDefinition.declarations := !ComDefinition.declarations @ [ComDefinition.Declaration.{
+        path = Nametab.path_of_global constructor_glob_ref;
+        type_ = ComDefinition.print_constr env sigma (Retyping.get_type_of_constr env (constructor_c |> EConstr.to_constr sigma) |> EConstr.of_constr);
+        kind = Constructor {ind_path = Nametab.path_of_global ind_glob_ref};
+      }]
+    )
+  )
 
 let preprocess_inductive_decl ~atts kind indl =
   snd @@ preprocess_inductive_decl ~atts kind indl
@@ -2188,22 +2219,31 @@ let subproof_cond = Proof.done_cond subproof_kind
 
 let vernac_subproof gln ~pstate =
   Declare.Proof.map ~f:(fun p ->
-    match gln with
+    let p' = match gln with
     | None -> Proof.focus subproof_cond () 1 p
     | Some (Goal_select.SelectNth n) -> Proof.focus subproof_cond () n p
     | Some (Goal_select.SelectId id) -> Proof.focus_id subproof_cond () id p
     | _ -> user_err
-             (str "Brackets do not support multi-goal selectors."))
+             (str "Brackets do not support multi-goal selectors.") in
+    if !Flags.tracing then
+      ComDefinition.record_step p p' ComDefinition.Step.StartSubproof;
+    p')
     pstate
 
 let vernac_end_subproof ~pstate =
   Declare.Proof.map ~f:(fun p ->
-      Proof.unfocus subproof_kind p ())
+      let p' = Proof.unfocus subproof_kind p () in
+      if !Flags.tracing then
+        ComDefinition.record_step p p' ComDefinition.Step.EndSubproof;
+      p')
     pstate
 
 let vernac_bullet (bullet : Proof_bullet.t) ~pstate =
   Declare.Proof.map ~f:(fun p ->
-    Proof_bullet.put p bullet) pstate
+    let p' = Proof_bullet.put p bullet in
+    if !Flags.tracing then
+      ComDefinition.record_step p p' (ComDefinition.Step.Bullet {bullet});
+    p') pstate
 
 (* Stack is needed due to show proof names, should deprecate / remove
    and take pstate *)
@@ -2405,6 +2445,7 @@ let translate_pure_vernac ?loc ~atts v = let open Vernactypes in match v with
   | VernacExactProof c ->
     vtcloseproof (fun ~lemma ->
         unsupported_attributes atts;
+        ComDefinition.end_proof ComDefinition.Declaration.Exact;
         vernac_exact_proof ~lemma c)
 
   | VernacAssumption ((discharge,kind),nl,l) ->
@@ -2653,7 +2694,10 @@ let translate_pure_vernac ?loc ~atts v = let open Vernactypes in match v with
 
   | VernacEndProof pe ->
     unsupported_attributes atts;
-    vtcloseproof (vernac_end_proof pe)
+    vtcloseproof (fun ~lemma ~pm ->
+      ComDefinition.end_proof (match pe with Admitted -> ComDefinition.Declaration.Admitted | Proved _ -> ComDefinition.Declaration.Proved);
+      vernac_end_proof pe ~lemma ~pm
+    )
 
   | VernacAbort ->
     unsupported_attributes atts;

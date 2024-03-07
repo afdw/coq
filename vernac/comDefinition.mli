@@ -12,6 +12,82 @@ open Names
 open Redexpr
 open Constrexpr
 
+val print_constr :
+  Environ.env ->
+  Evd.evar_map ->
+  EConstr.t ->
+  Constrextern.PrintingVariants.t
+
+val print_constr_expr :
+  Environ.env ->
+  Evd.evar_map ->
+  Constrexpr.constr_expr ->
+  Constrextern.PrintingVariants.t
+
+module Step : sig
+  type kind =
+    | Tactic of {
+        goal_selector : string;
+        tactic_raw : string;
+        tactic : Constrextern.PrintingVariants.t;
+        event : Proof.Event.t;
+      }
+    | StartSubproof
+    | EndSubproof
+    | Bullet of {bullet : Proof_bullet.t}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    goals_before : Proof.Goal.t list;
+    goals_after : Proof.Goal.t list;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
+val current_name : Names.Id.t option ref
+val current_type : EConstr.t option ref
+val current_steps : Step.t list ref
+
+val record_step : Proof.t -> Proof.t -> Step.kind -> unit
+
+module Declaration : sig
+  type outcome =
+    | Admitted
+    | Proved
+    | Exact
+    | Abort
+    | Fail
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type kind =
+    | Inductive
+    | Constructor of {ind_path : Libnames.full_path}
+    | Assumption
+    | Definition of {
+        value : Constrextern.PrintingVariants.t;
+        equations : Constrextern.PrintingVariants.t list;
+      }
+    | Interactive of {
+        steps : Step.t list;
+        outcome : outcome;
+      }
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    path : Libnames.full_path;
+    type_ : Constrextern.PrintingVariants.t;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
+val declarations : Declaration.t list ref
+
+val end_proof : Declaration.outcome -> unit
+
+val compute_equations :
+  Environ.env -> Evd.evar_map -> EConstr.rel_context ->
+  EConstr.t -> EConstr.t -> EConstr.t -> Evd.evar_map * EConstr.t list
+
 (** {6 Definitions/Let} *)
 
 val interp_definition

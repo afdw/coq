@@ -34,7 +34,7 @@ val definition_structure
   -> primitive_proj:bool
   -> Declarations.recursivity_kind
   -> Ast.t list
-  -> GlobRef.t list
+  -> (GlobRef.t * GlobRef.t list) list
 
   module Data : sig
     type projection_flags = {

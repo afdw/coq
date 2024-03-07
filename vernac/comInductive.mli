@@ -29,7 +29,7 @@ val do_mutual_inductive
   -> private_ind:bool
   -> uniform:uniform_inductive_flag
   -> Declarations.recursivity_kind
-  -> unit
+  -> Names.Ind.t list
 
 (** User-interface API *)
 

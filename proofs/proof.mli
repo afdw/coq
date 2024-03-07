@@ -51,6 +51,57 @@ type data =
 
 val data : t -> data
 
+val print_constr_hook : (Environ.env -> Evd.evar_map -> EConstr.t -> Constrextern.PrintingVariants.t) ref
+
+module Hyp : sig
+  type kind =
+    | Assumption
+    | Definition of {value : Constrextern.PrintingVariants.t}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    name : string;
+    type_ : Constrextern.PrintingVariants.t;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+
+  val make : Environ.env -> Evd.evar_map -> EConstr.named_declaration -> t
+end
+
+module Goal : sig
+  type t = {
+    hyps : Hyp.t list;
+    concl : Constrextern.PrintingVariants.t;
+  } [@@deriving yojson { variants = `Internal "type" }]
+
+  val make : Evd.evar_map -> Evar.t -> t
+end
+
+module Event : sig
+  type t =
+    | Sequence of {elements : t list}
+    | Dispatch of {
+      goals_before : Goal.t list;
+      branches : t list;
+    }
+    | Tactic of {
+      goals_before : Goal.t list;
+      goals_after : Goal.t list;
+      kind : Proofview_monad.Info.tactic_kind;
+      tactic : Constrextern.PrintingVariants.t;
+      details : t;
+    }
+    | Message of {message : string}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  val of_trace : Proofview_monad.Info.trace -> t
+end
+
+val printed_goal_selector : string option ref
+val root_tactic : (unit -> Pp.t) option ref
+val printed_root_tactic : Constrextern.PrintingVariants.t option ref
+val event : Event.t option ref
+
 (*** General proof functions ***)
 val start
   :  name:Names.Id.t

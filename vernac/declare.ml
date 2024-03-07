@@ -766,7 +766,7 @@ let declare_mutually_recursive ~info ~cinfo ~opaque ~uctx ~rec_declaration ~poss
   let fixnames = List.map (fun { CInfo.name } -> name) cinfo in
   recursive_message isfix indexes fixnames;
   List.iter (Metasyntax.add_notation_interpretation ~local:(scope=Locality.Discharge) (Global.env())) ntns;
-  csts
+  csts, List.combine cinfo fixdecls
 
 let warn_let_as_axiom =
   CWarnings.create ~name:"let-as-axiom" ~category:CWarnings.CoreCategories.vernacular
@@ -1320,7 +1320,7 @@ let declare_mutual_definition ~pm l =
     | IsCoFixpoint -> None
   in
   (* Declare the recursive definitions *)
-  let kns =
+  let kns, _ =
     declare_mutually_recursive ~info:first.prg_info
       ~uctx:first.prg_uctx ~rec_declaration ~possible_indexes ~opaque:first.prg_opaque
       ~cinfo:fixitems ?using:first.prg_using ()

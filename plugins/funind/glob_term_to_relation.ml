@@ -1572,7 +1572,7 @@ let build_inductive evd funconstants funsargs returned_types rtl =
   try
     Detyping.print_universes := true;
     Constrextern.print_universes := true;
-    do_build_inductive evd funconstants funsargs returned_types rtl;
+    do_build_inductive evd funconstants funsargs returned_types rtl |> ignore;
     Detyping.print_universes := pu;
     Constrextern.print_universes := cu
   with e when CErrors.noncritical e ->

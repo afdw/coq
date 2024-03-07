@@ -787,11 +787,12 @@ let do_mutual_inductive ~template udecl indl ~cumulative ~poly ?typing_flags ~pr
   (* Declare the global universes *)
   Global.push_context_set ~strict:true uctx;
   (* Declare the mutual inductive block with its associated schemes *)
-  ignore (DeclareInd.declare_mutual_inductive_with_eliminations ~default_dep_elim ?typing_flags ~indlocs mie binders implicits);
+  let mut_ind = DeclareInd.declare_mutual_inductive_with_eliminations ~default_dep_elim ?typing_flags ~indlocs mie binders implicits in
   (* Declare the possible notations of inductive types *)
   List.iter (Metasyntax.add_notation_interpretation ~local:false (Global.env ())) where_notations;
   (* Declare the coercions *)
-  List.iter (fun qid -> ComCoercion.try_add_new_coercion (Nametab.locate qid) ~local:false ~reversible:true) coercions
+  List.iter (fun qid -> ComCoercion.try_add_new_coercion (Nametab.locate qid) ~local:false ~reversible:true) coercions;
+  List.init (List.length mie.mind_entry_inds) (fun i -> (mut_ind, i))
 
 (** Prepare a "match" template for a given inductive type.
     For each branch of the match, we list the constructor name

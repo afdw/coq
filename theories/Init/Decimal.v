@@ -18,6 +18,10 @@
 
 Require Import Datatypes Specif.
 
+(* Begin added. *)
+Require Import Notations.
+(* End added. *)
+
 (** Unsigned integers are just lists of digits.
     For instance, ten is (D1 (D0 Nil)) *)
 

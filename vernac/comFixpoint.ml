@@ -278,8 +278,14 @@ let declare_fixpoint_interactive_generic ?indexes ~scope ?clearbody ~poly ?typin
   let init_terms = Some fixdefs in
   let evd = Evd.from_ctx ctx in
   let info = Declare.Info.make ~poly ~scope ?clearbody ~kind:(Decls.IsDefinition fix_kind) ~udecl ?typing_flags ?user_warns ~ntns () in
-  Declare.Proof.start_mutual_with_initialization ~info
-    evd ~mutual_info:(cofix,indexes,init_terms) ~cinfo:thms ?using None
+  let p = Declare.Proof.start_mutual_with_initialization ~info
+    evd ~mutual_info:(cofix,indexes,init_terms) ~cinfo:thms ?using None in
+  let thm_name = List.hd fixnames in
+  let thm_type = List.hd fixtypes |> EConstr.of_constr in
+  Option.assign ComDefinition.current_name thm_name;
+  Option.assign ComDefinition.current_type thm_type;
+  assert (!ComDefinition.current_steps = []);
+  p
 
 let declare_fixpoint_generic ?indexes ?scope ?clearbody ~poly ?typing_flags ?user_warns ?using ((fixnames,fixrs,fixdefs,fixtypes),udecl,uctx,fiximps) ntns =
   (* We shortcut the proof process *)
@@ -289,10 +295,26 @@ let declare_fixpoint_generic ?indexes ?scope ?clearbody ~poly ?typing_flags ?use
   let fix_kind = Decls.IsDefinition fix_kind in
   let info = Declare.Info.make ?scope ?clearbody ~kind:fix_kind ~poly ~udecl ?typing_flags ?user_warns ~ntns () in
   let cinfo = fixitems in
-  let _ : GlobRef.t list =
+  let (refs, l) : GlobRef.t list * _ =
     Declare.declare_mutually_recursive ~cinfo ~info ~opaque:false ~uctx
       ~possible_indexes:indexes ~rec_declaration ?using ()
   in
+  List.combine refs l |> List.iter (fun (ref, (c_info, value)) ->
+    let env = Global.env () in
+    let evd = Evd.from_env env in
+    let type_ = c_info |> Declare.CInfo.get_typ |> EConstr.of_constr in
+    let evd, c = Evd.fresh_global env evd ref in
+    let body = value |> EConstr.of_constr in
+    let evd, equations = ComDefinition.compute_equations env evd [] type_ c body in
+    ComDefinition.declarations := !ComDefinition.declarations @ [ComDefinition.Declaration.{
+      path = Libnames.make_path (Global.current_dirpath ()) (c_info |> Declare.CInfo.get_name);
+      type_ = ComDefinition.print_constr env evd type_;
+      kind = Definition {
+        value = ComDefinition.print_constr env evd body;
+        equations = equations |> List.map (ComDefinition.print_constr env evd);
+      };
+    }]
+  );
   ()
 
 let extract_decreasing_argument ~structonly { CAst.v = v; _ } =

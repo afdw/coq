@@ -13,6 +13,180 @@ open Util
 open Redexpr
 open Constrintern
 
+let print_constr env sigma e = Constrextern.PrintingVariants.make (fun () -> e |> Printer.pr_leconstr_env env sigma)
+
+let print_constr_expr env sigma e = Constrextern.PrintingVariants.make (fun () -> e |> Ppconstr.pr_lconstr_expr env sigma)
+
+let () = Proof.print_constr_hook := print_constr
+
+module Step = struct
+  type kind =
+    | Tactic of {
+        goal_selector : string;
+        tactic_raw : string;
+        tactic : Constrextern.PrintingVariants.t;
+        event : Proof.Event.t;
+      }
+    | StartSubproof
+    | EndSubproof
+    | Bullet of {bullet : Proof_bullet.t}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    goals_before : Proof.Goal.t list;
+    goals_after : Proof.Goal.t list;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
+let current_name = ref None
+let current_type = ref None
+let current_steps = ref []
+
+let record_step proof_before proof_after kind =
+  let Proof.{sigma = sigma_before; goals = goals_before; _} = proof_before |> Proof.data in
+  let Proof.{sigma = sigma_after; goals = goals_after; _} = proof_after |> Proof.data in
+  current_steps := !current_steps @ [Step.{
+    goals_before = goals_before |> List.map (Proof.Goal.make sigma_before);
+    goals_after = goals_after |> List.map (Proof.Goal.make sigma_after);
+    kind = kind;
+  }]
+
+module Declaration = struct
+  type outcome =
+    | Admitted
+    | Proved
+    | Exact
+    | Abort
+    | Fail
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type kind =
+    | Inductive
+    | Constructor of {ind_path : Libnames.full_path}
+    | Assumption
+    | Definition of {
+        value : Constrextern.PrintingVariants.t;
+        equations : Constrextern.PrintingVariants.t list;
+      }
+    | Interactive of {
+        steps : Step.t list;
+        outcome : outcome;
+      }
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    path : Libnames.full_path;
+    type_ : Constrextern.PrintingVariants.t;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
+let declarations = ref []
+
+let end_proof outcome =
+  if !Flags.tracing_interactive then
+    Feedback.msg_info Pp.(str "Recorded steps:" ++ spc () ++ int (!current_steps |> List.length));
+  if !Flags.tracing && !current_type <> None then begin
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    declarations := !declarations @ [Declaration.{
+      path = Libnames.make_path (Global.current_dirpath ()) (!current_name |> Option.get);
+      type_ = !current_type |> Option.get |> print_constr env sigma;
+      kind = Interactive {
+        steps = !current_steps;
+        outcome;
+      };
+    }]
+  end;
+  current_name := None;
+  current_type := None;
+  current_steps := []
+
+let rec compute_equations
+    (env : Environ.env) (sigma : Evd.evar_map) (ctx : EConstr.rel_context)
+    (type_ : EConstr.t) (left : EConstr.t) (right : EConstr.t) : Evd.evar_map * EConstr.t list =
+  match EConstr.kind sigma type_, EConstr.kind sigma right with
+  | Prod (na_1, t_1, type'), Lambda (na_2, t_2, right') when
+      Termops.eq_constr env sigma t_1 t_2 ->
+    let na = na_2 |> Context.map_annot (fun n -> if Names.Name.is_anonymous n then na_1.binder_name else n) in
+    compute_equations
+      env sigma (Context.Rel.Declaration.LocalAssum (na, t_2) :: ctx)
+      type' (EConstr.mkApp (left |> EConstr.Vars.lift 1, [|EConstr.mkRel 1|])) right'
+  | _, LetIn (na, b, t, right') ->
+    compute_equations
+      env sigma (Context.Rel.Declaration.LocalDef (na, b, t) :: ctx)
+      (type_ |> EConstr.Vars.lift 1) (left |> EConstr.Vars.lift 1) right'
+  | _, Case (ci, u, params, _, _, c, brs) when
+      EConstr.isRel sigma c &&
+      let n = EConstr.destRel sigma c in
+      let (_mib, mip) = Inductive.lookup_mind_specif env ci.ci_ind in
+      params |> Array.for_all (EConstr.Vars.noccur_between sigma 1 (n - 1)) &&
+      mip.mind_nrealargs = 0 ->
+    let n = EConstr.destRel sigma c in
+    let (_mib, mip) = Inductive.lookup_mind_specif env ci.ci_ind in
+    let unlifted_params = params |> Array.map (EConstr.Vars.substl (List.make n EConstr.mkProp)) in
+    brs |> Array.fold_left_i (fun contructor_i (sigma, equations) (nas, right') ->
+      let (constructor_ctx, _) = mip.mind_nf_lc.(contructor_i) in
+      let contructor_realdecls_count = mip.mind_consnrealdecls.(contructor_i) in
+      let (realargs_ctx, params_ctx) = constructor_ctx |> List.chop contructor_realdecls_count in
+      let (realargs_ctx, params_ctx) = (realargs_ctx |> EConstr.of_rel_context, params_ctx |> EConstr.of_rel_context) in
+      let params_subst = EConstr.Vars.subst_of_rel_context_instance params_ctx unlifted_params in
+      let params_substituted_realargs_ctx = realargs_ctx |> EConstr.Vars.substl_rel_context params_subst in
+      let named_realargs_ctx =
+        List.combine params_substituted_realargs_ctx (nas |> Array.rev_to_list) |> List.map (fun (declaration, na) ->
+          declaration |> Context.Rel.Declaration.set_name na.Context.binder_name
+        ) in
+      let lifted_params = unlifted_params |> Array.map (EConstr.Vars.lift contructor_realdecls_count) in
+      let self =
+        EConstr.mkApp (
+          EConstr.mkConstructU ((ci.ci_ind, contructor_i + 1), u),
+          Array.append
+            lifted_params
+            (params_substituted_realargs_ctx |> Context.Rel.instance EConstr.mkRel 0)
+        ) in
+      let (ctx_1, ctx_2) = ctx |> List.chop (n - 1) in
+      let substitued_ctx_1 =
+        ctx_1
+          |> EConstr.Vars.liftn_rel_context contructor_realdecls_count 2
+          |> EConstr.Vars.substl_rel_context [self] in
+      let ctx_2_tail = List.tl ctx_2 in
+      let new_ctx = substitued_ctx_1 @ named_realargs_ctx @ ctx_2_tail in
+      let subs =
+        Esubst.subs_liftn (n - 1) (
+          Esubst.subs_cons self (
+            Esubst.subs_shft (contructor_realdecls_count,
+              Esubst.subs_id (List.length ctx_1)
+            )
+          )
+        ) in
+      let new_type = type_ |> EConstr.Vars.esubst EConstr.Vars.lift subs in
+      let new_left = left |> EConstr.Vars.esubst EConstr.Vars.lift subs in
+      let new_right' =
+        right'
+          |> EConstr.Vars.esubst EConstr.Vars.lift (Esubst.subs_liftn contructor_realdecls_count subs)
+          |> EConstr.Vars.substl (List.init contructor_realdecls_count (fun i -> EConstr.mkRel (n + i))) in
+      let sigma, new_equations = compute_equations env sigma new_ctx new_type new_left new_right' in
+      sigma, equations @ new_equations
+    ) (sigma, [])
+  | _, Fix (([|n|], 0), ([|_|], [|_|], [|right'|])) ->
+    compute_equations env sigma ctx type_ left (right' |> EConstr.Vars.subst1 left)
+  | _, _ ->
+    let sigma, eq = Evd.fresh_global env sigma (Coqlib.lib_ref "core.eq.type") in
+    let sigma, refl = Evd.fresh_global env sigma (Coqlib.lib_ref "core.eq.refl") in
+    let sigma, type_ = Evarsolve.refresh_universes (Some false) env sigma type_ in
+    let sigma, left = Evarsolve.refresh_universes (Some false) env sigma left in
+    let sigma, right = Evarsolve.refresh_universes (Some false) env sigma right in
+    let applied_eq = EConstr.mkApp (eq, [|type_; left; right|]) in
+    let applied_refl = EConstr.mkApp (refl, [|type_; left|]) in
+    let equation = EConstr.it_mkProd_or_LetIn applied_eq ctx in
+    let sigma =
+      try Typing.check env sigma equation EConstr.mkProp
+      with Pretype_errors.PretypeError (_, _, Pretype_errors.CantApplyBadTypeExplained (_, Pretype_errors.UnifUnivInconsistency _)) -> sigma in
+    let _proof = EConstr.it_mkLambda_or_LetIn applied_refl ctx in
+    (* let sigma = Typing.check env sigma proof equation in *)
+    sigma, [equation]
+
 (* Commands of the interface: Constant definitions *)
 
 let red_constant_body red_opt env sigma body = match red_opt with
@@ -123,9 +297,37 @@ let do_definition ?hook ~name ?scope ?clearbody ~poly ?typing_flags ~kind ?using
   let kind = Decls.IsDefinition kind in
   let cinfo = Declare.CInfo.make ~name ~impargs ~typ:types () in
   let info = Declare.Info.make ?scope ?clearbody ~kind ?hook ~udecl ~poly ?typing_flags ?user_warns () in
-  let _ : Names.GlobRef.t =
+  let ref : Names.GlobRef.t =
     Declare.declare_definition ~info ~cinfo ~opaque:false ~body ?using evd
-  in ()
+  in
+  let env = Global.env () in
+  let evd, c = Evd.fresh_global env evd ref in
+  let type_ = types |> Option.default (Retyping.get_type_of env evd c) in
+  let evd, equations = compute_equations env evd [] type_ c body in
+  let equations =
+    match ref with
+    | ConstRef x when Names.Constant.to_string x = "Coq.Init.Logic.not" ->
+      equations |> List.map (
+        Termops.replace_term evd
+          c
+          (EConstr.mkVar (Names.Id.of_string_soft "~"))
+      )
+    | ConstRef x when Names.Constant.to_string x = "Coq.Init.Logic.iff" ->
+      equations |> List.map (
+        Termops.replace_term evd
+          (EConstr.mkApp (c, [|EConstr.mkRel 0; EConstr.mkRel (-1)|]))
+          (EConstr.mkApp (EConstr.mkRel 0, [|(EConstr.mkVar (Names.Id.of_string_soft "<->")); EConstr.mkRel (-1)|]))
+      )
+    | _ -> equations in
+  declarations := !declarations @ [Declaration.{
+    path = Nametab.path_of_global ref;
+    type_ = print_constr env evd type_;
+    kind = Definition {
+      value = print_constr env evd body;
+      equations = equations |> List.map (print_constr env evd);
+    };
+  }];
+  ()
 
 let do_definition_program ?hook ~pm ~name ~scope ?clearbody ~poly ?typing_flags ~kind ?using ?user_warns udecl bl red_option c ctypopt =
   let () = if not poly then udecl |> Option.iter (fun udecl ->
@@ -148,4 +350,5 @@ let do_definition_program ?hook ~pm ~name ~scope ?clearbody ~poly ?typing_flags 
     let cinfo = Declare.CInfo.make ~name ~typ ~impargs () in
     let info = Declare.Info.make ~udecl ~scope ?clearbody ~poly ~kind ?hook ?typing_flags ?user_warns () in
     Declare.Obls.add_definition ~pm ~cinfo ~info ~term ~uctx ?using obls
-  in pm
+  in
+  pm

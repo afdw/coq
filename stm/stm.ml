@@ -2140,7 +2140,9 @@ let known_state ~doc ?(redefine_qed=false) ~cache id =
                 let wall_clock2 = Unix.gettimeofday () in
                 let st = Vernacstate.freeze_full_state () in
                 let _st = match proof with
-                  | None -> stm_vernac_interp id st x
+                  | None ->
+                    ComDefinition.end_proof (ComDefinition.Declaration.Abort);
+                    stm_vernac_interp id st x
                   | Some proof ->
                     let control, pe = extract_pe x in
                     { st with interp = stm_qed_delay_proof ~id ~st ~proof ~loc ~control pe }
@@ -2440,7 +2442,7 @@ let process_transaction ~doc ?(newtip=Stateid.fresh ()) x c =
       (* Proof *)
       | VtStartProof (guarantee, names) ->
 
-         if not (get_allow_nested_proofs ()) && VCS.proof_nesting () > 0 then
+         if (not (get_allow_nested_proofs ()) || !Flags.tracing) && VCS.proof_nesting () > 0 then
           "Nested proofs are discouraged and not allowed by default. \
            This error probably means that you forgot to close the last \"Proof.\" with \"Qed.\" or \"Defined.\". \
            If you really intended to use nested proofs, you can do so by turning the \"Nested Proofs Allowed\" flag on."
