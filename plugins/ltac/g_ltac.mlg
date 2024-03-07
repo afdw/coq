@@ -360,12 +360,15 @@ let is_explicit_terminator = function
 }
 
 VERNAC { tactic_mode } EXTEND VernacSolve STATE proof
-| [ ltac_selector_opt(g) ltac_info_opt(info) tactic(t) ltac_use_default(with_end_tac) ] =>
+| [ ltac_selector_opt(g) ltac_info_opt(info) tactic(ast) ltac_use_default(with_end_tac) ] =>
     { classify_as_proofstep } -> {
     let g = Option.default (Goal_select.get_default_goal_selector ()) g in
     let global = match g with Goal_select.SelectAll | Goal_select.SelectList _ -> true | _ -> false in
-    let t = Tacinterp.hide_interp { Tacinterp.global; ast = t; } in
-    ComTactic.solve g ~info t ~with_end_tac
+    let t = Tacinterp.hide_interp { Tacinterp.global; ast; } in
+    fun ~pstate ->
+      let sigma, env = Declare.Proof.get_current_context pstate in
+      let print () = Pptactic.pr_raw_tactic env sigma ast in
+      ComTactic.solve ~pstate g ~info ~print t ~with_end_tac
   }
 END
 

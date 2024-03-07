@@ -89,3 +89,21 @@ val with_meta_as_hole : ('a -> 'b) -> 'a -> 'b
 
 (** Probably shouldn't be used *)
 val empty_extern_env : extern_env
+
+module PrintingVariants : sig
+  type t = {
+    default : string;
+    full_path : string;
+    no_notations : string;
+    low_level : string;
+    features : Libnames.Fset.t;
+  } [@@deriving yojson]
+
+  val run : (bool ref * bool) list -> (unit -> 'a) -> 'a
+
+  val run_default : (unit -> 'a) -> 'a
+  val run_no_notations : (unit -> 'a) -> 'a
+  val run_low_level : (unit -> 'a) -> 'a
+
+  val make : (unit -> Pp.t) -> t
+end

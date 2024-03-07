@@ -2054,7 +2054,13 @@ let hide_interp {global;ast} =
     let ist = Genintern.empty_glob_sign ~strict:false env in
     let te = intern_pure_tactic ist ast in
     let t = eval_tactic te in
-    t
+    if !Flags.tracing then
+      (Proofview.tclUNIT () >>= (fun () ->
+        Option.assign Proof.root_tactic (fun () -> Pptactic.pr_glob_tactic env te);
+        Proofview.tclUNIT ()
+      )) <*> t
+    else
+      t
   in
   if global then
     Proofview.tclENV >>= fun env ->

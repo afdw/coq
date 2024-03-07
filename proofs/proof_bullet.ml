@@ -8,12 +8,14 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+open Ppx_yojson_conv_lib.Yojson_conv.Primitives
 open Proof
 
 type t =
     | Dash of int
     | Star of int
     | Plus of int
+    [@@deriving yojson]
 
 let bullet_eq b1 b2 = match b1, b2 with
 | Dash n1, Dash n2 -> n1 = n2

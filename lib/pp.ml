@@ -203,6 +203,14 @@ let string_of_ppcmds c =
   Format.fprintf Format.str_formatter "@[%a@]" pp_with c;
   Format.flush_str_formatter ()
 
+let single_line_string_of_ppcmds c =
+  let buffer = Buffer.create 512 in
+  let formatter = Format.formatter_of_buffer buffer in
+  Format.pp_set_margin formatter max_int;
+  Format.fprintf formatter "@[%a@]" pp_with c;
+  Format.pp_print_flush formatter ();
+  buffer |> Buffer.to_bytes |> String.of_bytes
+
 (* Copy paste from Util *)
 
 let pr_comma () = str "," ++ spc ()

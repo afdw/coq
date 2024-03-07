@@ -4,4 +4,5 @@
  (public_name coq-core.proofs)
  (wrapped false)
  (modules_without_implementation tactypes)
- (libraries pretyping))
+ (libraries pretyping interp yojson ppx_yojson_conv)
+ (preprocess (pps ppx_yojson_conv)))

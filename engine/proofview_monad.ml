@@ -14,12 +14,13 @@
 (** {6 Trees/forest for traces} *)
 
 module Trace = struct
+  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
 
   (** The intent is that an ['a forest] is a list of messages of type
       ['a]. But messages can stand for a list of more precise
       messages, hence the structure is organised as a tree. *)
-  type 'a forest = 'a tree list
-  and  'a tree   = Seq of 'a * 'a forest
+  type 'a forest = 'a tree list [@@deriving yojson]
+  and  'a tree   = Seq of 'a * 'a forest [@@deriving yojson]
 
   (** To build a trace incrementally, we use an intermediary data
       structure on which we can define an S-expression like language
@@ -68,6 +69,7 @@ type lazy_msg = unit -> Pp.t
 
 (** Info trace. *)
 module Info = struct
+  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
 
   (** The type of the tags for [info]. *)
   type tag =
@@ -146,6 +148,35 @@ module Info = struct
     | _ , (Seq(Msg _,_) as t) -> [t]
   and collapse n f =
     CList.map_append (collapse_tree n) f
+
+  type 'a event =
+    | EventSeq of 'a event list
+    | EventMsg of string
+    | EventTactic of 'a * 'a event
+    | EventDispatch of 'a event list
+    [@@deriving yojson]
+
+  let rec printed_tree f = let open Trace in function
+    | Seq (Msg m, []) -> EventMsg (m () |> Pp.single_line_string_of_ppcmds)
+    | Seq (Tactic m, brs) -> EventTactic (f m, printed f brs)
+    | Seq (Dispatch, brs) ->
+      let brs = brs |> List.map unbranch in
+      (match brs with
+      | [b] -> printed f b
+      | brs ->
+        let es = brs |> List.map (printed f) in
+        let all_empty = es |> List.for_all (fun e -> match e with EventSeq [] -> true | _ -> false) in
+        if all_empty then EventSeq [] else EventDispatch es)
+    | Seq (Msg _, _ :: _) | Seq (DBranch, _) -> assert false
+
+  and printed f = function
+    | [b] -> printed_tree f b
+    | l ->
+      let es = l |> List.map (printed_tree f) in
+      let filtered_es = es |> List.filter (fun e -> match e with EventSeq [] -> false | _ -> true) in
+      match filtered_es with
+      | [e] -> e
+      | es -> EventSeq es
 end
 
 module StateStore = Store.Make()

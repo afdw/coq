@@ -66,7 +66,41 @@ let init_toplevel { parse_extra; init_extra; usage; initial_args } =
   let customstate = init_extra ~opts customopts injections in
   opts, customopts, customstate
 
+module Trace = struct
+  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
+
+  type t = {
+    theorems : Vernacentries.Theorem.t list;
+  } [@@deriving yojson]
+end
+
 let start_coq custom =
+  Flags.tracing_interactive := Sys.getenv_opt "TRACING_INTERACTIVE" |> Option.has_some;
+  Flags.tracing_file := Sys.getenv_opt "TRACING_FILE";
+  Flags.tracing := !Flags.tracing_interactive || (!Flags.tracing_file |> Option.has_some);
+  at_exit (fun () ->
+    if !Flags.tracing_interactive then
+      Feedback.msg_info Pp.(str "Collected theorems:" ++ spc () ++ int (!Vernacentries.theorems |> List.length));
+    match !Flags.tracing_file with
+    | None -> ()
+    | Some filename ->
+      Util.modify_file_with_lock ~filename ~f:(fun old_contents ->
+        let trace =
+          if old_contents = "" then
+            {
+              Trace.theorems = [];
+            }
+          else
+            old_contents |> Yojson.Safe.from_string |> Trace.t_of_yojson
+        in
+        let trace = {
+          Trace.theorems = trace.theorems @ !Vernacentries.theorems
+        } in
+        let new_contents = (trace |> Trace.yojson_of_t |> Yojson.Safe.pretty_to_string) ^ "\n" in
+        new_contents
+      )
+  );
+
   let init_feeder = Feedback.add_feeder Coqloop.coqloop_feed in
   (* Init phase *)
   let opts, custom_opts, state =

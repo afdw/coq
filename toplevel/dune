@@ -8,7 +8,9 @@
  (libraries coq-core.stm
   (select memtrace_init.ml from
    (memtrace -> memtrace_init.memtrace.ml)
-   (!memtrace -> memtrace_init.default.ml))))
+   (!memtrace -> memtrace_init.default.ml))
+  yojson ppx_yojson_conv)
+ (preprocess (pps ppx_yojson_conv)))
 
 ; Interp provides the `zarith` library to plugins, we could also use
 ; -linkall in the plugins file, to be discussed.

@@ -97,6 +97,71 @@ let with_section_locality ~atts f =
   let section_local = make_section_locality local in
   f ~section_local
 
+module Goal = struct
+  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
+
+  type hyp =
+    | Assum of {name : string; type_ : Constrextern.PrintingVariants.t}
+    | Def of {name : string; type_ : Constrextern.PrintingVariants.t; value : Constrextern.PrintingVariants.t}
+    [@@deriving yojson]
+
+  type t = {
+    hyps : hyp list;
+    concl : Constrextern.PrintingVariants.t;
+  } [@@deriving yojson]
+
+  let make sigma g =
+    let EvarInfo evi = Evd.find sigma g in
+    let env = Evd.evar_filtered_env (Global.env ()) evi in
+    let ctxt = EConstr.named_context env in
+    let concl =
+      match Evd.evar_body evi with
+      | Evd.Evar_empty -> Evd.evar_concl evi
+      | Evd.Evar_defined b -> Retyping.get_type_of env sigma b
+    in
+    let print e = Constrextern.PrintingVariants.make (fun () -> e |> Printer.pr_econstr_env env sigma) in
+    {
+      hyps =
+        ctxt |> List.map (
+          let open Context.Named.Declaration in function
+          | LocalAssum (name, type_) ->
+            Assum {name = name.binder_name |> Names.Id.to_string; type_ = print type_ }
+          | LocalDef (name, value, type_) ->
+            Def {name = name.binder_name |> Names.Id.to_string; type_ = print type_; value = print value }
+        );
+      concl = print concl;
+    }
+end
+
+module Step = struct
+  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
+
+  type kind =
+    | Tactic of {
+        raw : string;
+        tactic : Constrextern.PrintingVariants.t;
+        event : Constrextern.PrintingVariants.t Proofview_monad.Info.event;
+      }
+    | StartSubproof
+    | EndSubproof
+    | Bullet of Proof_bullet.t
+    [@@deriving yojson]
+
+  type t = {
+    goals_before : Goal.t list;
+    kind : kind;
+  } [@@deriving yojson]
+end
+
+let steps = ref []
+
+let record_step proof kind =
+  let {Proof.sigma; Proof.goals; _} = proof |> Proof.data in
+  steps := !steps @ [{
+    Step.goals_before = goals |> List.map (Goal.make sigma);
+    Step.kind = kind;
+  }]
+
 (*******************)
 (* "Show" commands *)
 
@@ -631,6 +696,7 @@ let start_lemma_com ~typing_flags ~program_mode ~poly ~scope ?clearbody ~kind ?u
   let mut_analysis = RecLemmas.look_for_possibly_mutual_statements evd thms in
   let evd = Evd.minimize_universes evd in
   let info = Declare.Info.make ?hook ~poly ~scope ?clearbody ~kind ~udecl ?typing_flags ?user_warns () in
+  steps := [];
   begin
     match mut_analysis with
     | RecLemmas.NonMutual thm ->
@@ -2133,6 +2199,8 @@ let subproof_cond = Proof.done_cond subproof_kind
 
 let vernac_subproof gln ~pstate =
   Declare.Proof.map ~f:(fun p ->
+    if !Flags.tracing then
+      record_step p Step.StartSubproof;
     match gln with
     | None -> Proof.focus subproof_cond () 1 p
     | Some (Goal_select.SelectNth n) -> Proof.focus subproof_cond () n p
@@ -2143,11 +2211,15 @@ let vernac_subproof gln ~pstate =
 
 let vernac_end_subproof ~pstate =
   Declare.Proof.map ~f:(fun p ->
+      if !Flags.tracing then
+        record_step p Step.EndSubproof;
       Proof.unfocus subproof_kind p ())
     pstate
 
 let vernac_bullet (bullet : Proof_bullet.t) ~pstate =
   Declare.Proof.map ~f:(fun p ->
+    if !Flags.tracing then
+      record_step p (Step.Bullet bullet);
     Proof_bullet.put p bullet) pstate
 
 (* Stack is needed due to show proof names, should deprecate / remove
@@ -2309,6 +2381,35 @@ let translate_vernac_synterp ?loc ~atts v = let open Vernactypes in match v with
   (* Extensions *)
   | EVernacExtend f -> f
 
+module Theorem = struct
+  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
+
+  type outcome =
+    | Admitted
+    | Proved
+    | Exact
+    [@@deriving yojson]
+
+  type t = {
+    path : Libnames.full_path;
+    steps : Step.t list;
+    outcome : outcome;
+  } [@@deriving yojson]
+end
+
+let theorems = ref []
+
+let end_proof ~name ~outcome =
+  if !Flags.tracing_interactive then
+    Feedback.msg_info Pp.(str "Recorded steps:" ++ spc () ++ int (!steps |> List.length));
+  if !Flags.tracing then
+    let theorem = {
+      Theorem.path = Libnames.make_path (Global.current_dirpath ()) name;
+      Theorem.steps = !steps;
+      Theorem.outcome;
+    } in
+    theorems := !theorems @ [theorem]
+
 let translate_pure_vernac ?loc ~atts v = let open Vernactypes in match v with
   | VernacAbortAll
   | VernacRestart
@@ -2349,6 +2450,7 @@ let translate_pure_vernac ?loc ~atts v = let open Vernactypes in match v with
   | VernacExactProof c ->
     vtcloseproof (fun ~lemma ->
         unsupported_attributes atts;
+        end_proof ~name:(lemma |> Declare.Proof.get_name) ~outcome:Theorem.Exact;
         vernac_exact_proof ~lemma c)
 
   | VernacAssumption ((discharge,kind),nl,l) ->
@@ -2597,7 +2699,12 @@ let translate_pure_vernac ?loc ~atts v = let open Vernactypes in match v with
 
   | VernacEndProof pe ->
     unsupported_attributes atts;
-    vtcloseproof (vernac_end_proof pe)
+    vtcloseproof (fun ~lemma ~pm ->
+      end_proof
+        ~name:(lemma |> Declare.Proof.get_name)
+        ~outcome:(match pe with Admitted -> Theorem.Admitted | Proved _ -> Theorem.Proved);
+      vernac_end_proof pe ~lemma ~pm
+    )
 
   | VernacAbort ->
     unsupported_attributes atts;

@@ -33,7 +33,10 @@
   (ocaml (>= 4.09.0))
   (ocamlfind (>= 1.8.1))
   (zarith (>= 1.11))
-  (conf-linux-libc-dev (= :os "linux")))
+  (conf-linux-libc-dev (= :os "linux"))
+  (yojson (>= 2.1.2))
+  (ppx_yojson_conv (>= 0.16.0))
+  (flock (>= 1.0.0)))
  (depopts coq-native)
  (synopsis "The Coq Proof Assistant -- Core Binaries and Tools")
  (description "Coq is a formal proof management system. It provides
@@ -56,6 +59,7 @@ prelude, now living in the coq-stdlib package."))
 
 (package
  (name coq-stdlib)
+ (allow_empty)
  (depends
   (coq-core (= :version)))
  (depopts coq-native)
