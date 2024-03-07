@@ -9,6 +9,7 @@
 (************************************************************************)
 
 open Names
+open Util
 
 (** {6 Dirpaths } *)
 val dirpath_of_string : string -> DirPath.t
@@ -50,6 +51,8 @@ val basename : full_path -> Id.t
 val path_of_string : string -> full_path
 val string_of_path : full_path -> string
 val pr_path : full_path -> Pp.t
+val full_path_to_yojson : full_path -> Yojson.Safe.t
+val full_path_of_yojson : Yojson.Safe.t -> full_path Ppx_deriving_yojson_runtime.error_or
 
 module Spmap  : CSig.MapS with type key = full_path
 
@@ -96,3 +99,24 @@ val coq_string : string (* "Coq" *)
 (** This is the default root prefix for developments which doesn't
    mention a root *)
 val default_root_prefix : DirPath.t
+
+module Feature : sig
+  type t =
+    | ConstRef of {path: full_path}
+    | IndRef of {path: full_path}
+    | ConstructRef of {ind_path: full_path; path: full_path}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  val equal : t -> t -> bool
+
+  val compare : t -> t -> int
+end
+
+module Fset : sig
+  include Set.S with type elt = Feature.t
+
+  val to_yojson : t -> Yojson.Safe.t
+  val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
+end
+
+module Fmap : Map.ExtS with type key = Feature.t and module Set := Fset

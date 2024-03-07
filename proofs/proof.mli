@@ -51,6 +51,10 @@ type data =
 
 val data : t -> data
 
+val root_tactic : (unit -> Pp.t) option ref
+val printed_root_tactic : Constrextern.PrintingVariants.t option ref
+val event : Constrextern.PrintingVariants.t Proofview_monad.Event.t option ref
+
 (*** General proof functions ***)
 val start
   :  name:Names.Id.t

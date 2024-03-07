@@ -61,6 +61,12 @@ val flatten : 'a option option -> 'a option
     [None]. *)
 val append : 'a option -> 'a option -> 'a option
 
+(** [combine x y] is same as [append x y] except that it fails
+    in case of [combine (Some a) (Some b)]. *)
+val combine : 'a option -> 'a option -> 'a option
+
+(** [assign v r] is [r := combine !r (Some v)] *)
+val assign : 'a option ref -> 'a -> unit
 
 (** {6 "Iterators"} *)
 
@@ -97,6 +103,8 @@ val fold_right_map : ('b -> 'a -> 'c * 'a) -> 'b option -> 'a -> 'c option * 'a
 
 (** [cata f e x] is [e] if [x] is [None] and [f a] if [x] is [Some a] *)
 val cata : ('a -> 'b) -> 'b -> 'a option -> 'b
+
+val to_list : 'a option -> 'a list
 
 (** {6 More Specific Operations} *)
 

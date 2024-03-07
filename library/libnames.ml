@@ -125,6 +125,12 @@ let path_of_string s =
 
 let pr_path sp = Pp.str (string_of_path sp)
 
+let full_path_to_yojson sp =
+  sp |> string_of_path |> [%to_yojson: string]
+
+let full_path_of_yojson j =
+  j |> [%of_yojson: string] |> Result.map path_of_string
+
 (*s qualified names *)
 type qualid_r = full_path
 type qualid = qualid_r CAst.t
@@ -171,3 +177,29 @@ let idset_mem_qualid qid s =
 let coq_string = "Coq"
 let coq_root = Id.of_string coq_string
 let default_root_prefix = DirPath.empty
+
+module Feature = struct
+  type t =
+    | ConstRef of {path: full_path}
+    | IndRef of {path: full_path}
+    | ConstructRef of {ind_path: full_path; path: full_path}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  let equal f1 f2 =
+    f1 == f2
+
+  let compare f1 f2 =
+    compare f1 f2
+end
+
+module Fset = struct
+  include Set.Make(Feature)
+
+  let to_yojson f =
+    f |> to_list |> [%to_yojson: Feature.t list]
+
+  let of_yojson j =
+    j |> [%of_yojson: Feature.t list] |> Result.map of_list
+end
+
+module Fmap = Map.Make(Feature)

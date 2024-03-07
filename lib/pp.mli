@@ -198,6 +198,7 @@ val pr_vertical_list : ('b -> t) -> 'b list -> t
 val pp_with          : Format.formatter -> t -> unit
 
 val string_of_ppcmds : t -> string
+val simple_string_of_ppcmds : t -> string
 
 (** Tag prefix to start a multi-token diff span *)
 val start_pfx : string

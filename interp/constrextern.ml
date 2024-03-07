@@ -200,6 +200,9 @@ let default_extern_reference ?loc vars r =
   try Nametab.shortest_qualid_of_global ?loc vars r
   with Not_found when GlobRef.is_bound r -> qualid_of_path (path_of_global r)
 
+let full_path_extern_reference ?loc vars r =
+  qualid_of_path (Nametab.path_of_global r)
+
 let my_extern_reference = ref default_extern_reference
 
 let set_extern_reference f = my_extern_reference := f
@@ -1565,3 +1568,113 @@ let extern_rel_context where env sigma sign =
   let vars = extern_env env sigma in
   let a = List.map (extended_glob_local_binder_of_decl) a in
   pi3 (extern_local_binder ((constr_some_level,None),([],[])) vars a)
+
+module PrintingVariants =
+struct
+  type t = {
+    default : string;
+    full_path : string;
+    no_notations : string;
+    low_level : string;
+    features : Libnames.Fset.t;
+  } [@@deriving yojson { variants = `Internal "type" }]
+
+  let rec run l f =
+    match l with
+    | [] -> f ()
+    | (r, v) :: l -> Flags.with_modified_ref r (fun _ -> v) (fun () -> run l f) ()
+
+  let run_default f =
+    run [
+      Flags.raw_print, false;
+      print_coercions, false;
+      print_parentheses, false;
+      print_implicits, false;
+      print_implicits_defensive, true;
+      print_projections, false;
+      print_no_symbol, false;
+      print_raw_literal, false;
+      print_universes, false;
+    ] f
+
+  let run_full_path f =
+    run [
+      Flags.raw_print, false;
+      print_coercions, false;
+      print_parentheses, false;
+      print_implicits, false;
+      print_implicits_defensive, true;
+      print_projections, false;
+      print_no_symbol, true;
+      print_raw_literal, false;
+      print_universes, false;
+    ] (fun _ ->
+      Flags.with_modified_ref my_extern_reference (fun _ -> full_path_extern_reference) f ()
+    )
+
+  let run_no_notations f =
+    run [
+      Flags.raw_print, false;
+      print_coercions, false;
+      print_parentheses, false;
+      print_implicits, false;
+      print_implicits_defensive, true;
+      print_projections, false;
+      print_no_symbol, true;
+      print_raw_literal, true;
+      print_universes, false;
+    ] (fun _ ->
+      Flags.with_modified_ref my_extern_reference (fun _ -> full_path_extern_reference) f ()
+    )
+
+  let run_low_level f =
+    run [
+      Flags.raw_print, true;
+      print_coercions, false;
+      print_parentheses, false;
+      print_implicits, false;
+      print_implicits_defensive, true;
+      print_projections, false;
+      print_no_symbol, false;
+      print_raw_literal, true;
+      print_universes, false;
+    ](fun _ ->
+      Flags.with_modified_ref my_extern_reference (fun _ -> full_path_extern_reference) f ()
+    )
+
+  let make f =
+    let g () = simple_string_of_ppcmds (f ()) in
+    let features = ref Libnames.Fset.empty in
+    run_low_level (fun () ->
+      Flags.with_modified_ref
+        my_extern_reference
+        (fun old_extern_reference ?loc vars r ->
+          (match r with
+          | VarRef _ -> ()
+          | ConstRef const ->
+            features := !features |> Libnames.Fset.add (Libnames.Feature.ConstRef {
+              path = Nametab.path_of_global (ConstRef const);
+            })
+          | IndRef ind ->
+            features := !features |> Libnames.Fset.add (Libnames.Feature.IndRef {
+              path = Nametab.path_of_global (IndRef ind);
+            })
+          | ConstructRef ((ind, _) as constructor) ->
+            features := !features |> Libnames.Fset.add (Libnames.Feature.ConstructRef {
+              ind_path = Nametab.path_of_global (IndRef ind);
+              path = Nametab.path_of_global (ConstructRef constructor);
+            })
+          );
+          old_extern_reference ?loc vars r
+        )
+        (fun _ -> f () |> ignore)
+        ()
+    );
+    {
+      default = run_default g;
+      full_path = run_full_path g;
+      no_notations = run_no_notations g;
+      low_level = run_low_level g;
+      features = !features;
+    }
+end
