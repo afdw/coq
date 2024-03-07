@@ -201,3 +201,16 @@ let set_temporary_memory () =
   let a = ref None in
   (fun x -> assert (!a = None); a := Some x; x),
   (fun () -> match !a with Some x -> x | None -> assert false)
+
+let modify_file_with_lock ~filename ~f =
+  let fd = Unix.openfile filename [Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC] 0o666 in
+  Flock.flock fd Flock.LOCK_EX;
+  let in_channel = Unix.in_channel_of_descr fd in
+  let old_length = in_channel_length in_channel in
+  let old_contents = really_input_string in_channel old_length in
+  let new_contents = f old_contents in
+  let new_length = new_contents |> String.length in
+  assert (Unix.lseek fd 0 Unix.SEEK_SET = 0);
+  assert (Unix.write fd (new_contents |> Bytes.of_string) 0 new_length = new_length);
+  Unix.ftruncate fd new_length;
+  Unix.close fd
