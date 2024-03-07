@@ -54,9 +54,24 @@ let solve_core ~pstate n ~info t ~with_end_tac:b =
   if not status then Feedback.feedback Feedback.AddedAxiom;
   pstate
 
-let solve ~pstate n ~info t ~with_end_tac =
+let solve ~pstate n ~info ~print t ~with_end_tac =
+  Proof.printed_root_tactic := None;
+  Proof.event := None;
   let t = interp_tac t in
-  solve_core ~pstate n ~info t ~with_end_tac
+  let p = solve_core ~pstate n ~info t ~with_end_tac in
+  if !Flags.tracing && !Proof.printed_root_tactic <> None then
+    Vernacentries.record_step (pstate |> Declare.Proof.get) (p |> Declare.Proof.get) (Vernacentries.Step.Tactic {
+      raw = print () |> Pp.simple_string_of_ppcmds;
+      tactic = !Proof.printed_root_tactic |> Option.get;
+      event = !Proof.event |> Option.get;
+    });
+  if !Flags.tracing_interactive && !Proof.printed_root_tactic <> None then begin
+    Feedback.msg_info Pp.(str "Tactic:" ++ spc () ++ str (!Proof.printed_root_tactic |> Option.get |>
+      Constrextern.PrintingVariants.to_yojson |> Yojson.Safe.pretty_to_string));
+    Feedback.msg_info Pp.(str "Event:" ++ spc () ++ str (!Proof.event |> Option.get |>
+      Proofview_monad.Event.to_yojson Constrextern.PrintingVariants.to_yojson |> Yojson.Safe.pretty_to_string))
+  end;
+  p
 
 let check_par_applicable pstate =
   Declare.Proof.fold pstate ~f:(fun p ->
@@ -81,5 +96,7 @@ let par_implementation = ref (fun ~pstate ~info t ~abstract ~with_end_tac ->
 let set_par_implementation f = par_implementation := f
 
 let solve_parallel ~pstate ~info t ~abstract ~with_end_tac =
+  if !Flags.tracing then
+    CErrors.user_err Pp.(strbrk("The par: goal selector is not supported"));
   check_par_applicable pstate;
   !par_implementation ~pstate ~info t ~abstract ~with_end_tac
