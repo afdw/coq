@@ -61,7 +61,7 @@ module Info : sig
     | Builtin of Pp.t
     | Alias of Pp.t
     | ML of Pp.t
-    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+    [@@deriving yojson { variants = `Adjacent ("type", "s") }]
 
   type saved_proofview = Evd.evar_map * Evar.t list
 

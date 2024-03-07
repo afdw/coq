@@ -103,6 +103,7 @@ let compile opts stm_options injections copts ~echo ~f_in ~f_out =
       ()
 
 let compile opts stm_opts copts injections ~echo ~f_in ~f_out =
+  Flags.tracing_sub_suffix := Str.global_replace (Str.regexp "\\.") "_" (Filename.basename f_in);
   ignore(CoqworkmgrApi.get 1);
   compile opts stm_opts injections copts ~echo ~f_in ~f_out;
   CoqworkmgrApi.giveback 1

@@ -2440,7 +2440,7 @@ let process_transaction ~doc ?(newtip=Stateid.fresh ()) x c =
       (* Proof *)
       | VtStartProof (guarantee, names) ->
 
-         if not (get_allow_nested_proofs ()) && VCS.proof_nesting () > 0 then
+         if (not (get_allow_nested_proofs ()) || !Flags.tracing) && VCS.proof_nesting () > 0 then
           "Nested proofs are discouraged and not allowed by default. \
            This error probably means that you forgot to close the last \"Proof.\" with \"Qed.\" or \"Defined.\". \
            If you really intended to use nested proofs, you can do so by turning the \"Nested Proofs Allowed\" flag on."

@@ -198,6 +198,7 @@ val pr_vertical_list : ('b -> t) -> 'b list -> t
 val pp_with          : Format.formatter -> t -> unit
 
 val string_of_ppcmds : t -> string
+val simple_string_of_ppcmds : t -> string
 
 (** Tag prefix to start a multi-token diff span *)
 val start_pfx : string
@@ -216,3 +217,6 @@ val db_string_of_pp : t -> string
 
 (** Combine nested Ppcmd_glues *)
 val flatten : t -> t
+
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or

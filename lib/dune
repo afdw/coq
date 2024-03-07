@@ -11,4 +11,6 @@
    (memprof-limits -> interrupted.memprof.ml))
   (select instr.ml from
    (!coqperf -> instr.noperf.ml)
-   (coqperf -> instr.perf.ml))))
+   (coqperf -> instr.perf.ml))
+  unix flock yojson)
+ (preprocess (pps ppx_deriving_yojson)))
