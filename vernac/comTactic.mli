@@ -26,6 +26,7 @@ val solve :
   pstate:Declare.Proof.t ->
   Goal_select.t ->
   info:int option ->
+  print:(unit -> Pp.t) ->
   interpretable ->
   with_end_tac:bool ->
   Declare.Proof.t
