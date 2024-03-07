@@ -138,7 +138,7 @@ let get_debug () = if Flags.async_proofs_is_worker () then DebugOff else !debug
 let log_trace = ref false
 
 let is_traced () =
-  !log_trace || !debug <> DebugOff || !Flags.profile_ltac
+  !log_trace || !debug <> DebugOff || !Flags.profile_ltac || !Flags.tracing
 
 (** More naming applications *)
 let name_vfun appl vle =
@@ -2069,7 +2069,13 @@ let hide_interp {global;ast} =
     let te = intern_pure_tactic ist ast in
     Feedback.msg_info Pp.(str "hide_interp " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) te with e when CErrors.noncritical e -> Pp.str "!?!");
     let t = eval_tactic te in
-    t
+    if !Flags.tracing then
+      (Proofview.tclUNIT () >>= (fun () ->
+        Option.assign Proof.root_tactic (fun () -> Pptactic.pr_glob_tactic env (Evd.from_env env) te);
+        Proofview.tclUNIT ()
+      )) <*> t
+    else
+      t
   in
   if global then
     Proofview.tclENV >>= fun env ->

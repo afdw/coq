@@ -8,4 +8,6 @@
   coq-core.boot coq-core.clib coq-core.config
   (select instr.ml from
    (!coqperf -> instr.noperf.ml)
-   (coqperf -> instr.perf.ml))))
+   (coqperf -> instr.perf.ml))
+  unix flock yojson ppx_deriving_yojson)
+ (preprocess (pps ppx_deriving_yojson)))

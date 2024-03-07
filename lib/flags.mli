@@ -99,3 +99,11 @@ val profile_ltac_cutoff : float ref
 
 (** Default output directory *)
 val output_directory : CUnix.physical_path option ref
+
+val tracing_interactive : bool ref
+val tracing_file : string option ref
+val tracing : bool ref
+val tracing_split : bool ref
+val tracing_sub_suffix : string ref
+val tracing_compress : bool ref
+val tracing_no_event : bool ref
