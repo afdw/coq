@@ -274,6 +274,98 @@ let end_of_stack = CondEndStack end_of_stack_kind
 
 let unfocused = is_last_focus end_of_stack_kind
 
+let print_constr_hook = ref (fun _ _ _ -> assert false)
+
+module Hyp = struct
+  type kind =
+    | Assumption
+    | Definition of {value : Constrextern.PrintingVariants.t}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    name : string;
+    type_ : Constrextern.PrintingVariants.t;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+
+  let make env sigma =
+    let open Context.Named.Declaration in function
+    | LocalAssum (name, type_) ->
+      {
+        name = name.binder_name |> Names.Id.to_string;
+        type_ = !print_constr_hook env sigma type_;
+        kind = Assumption;
+      }
+    | LocalDef (name, value, type_) ->
+      {
+        name = name.binder_name |> Names.Id.to_string;
+        type_ = !print_constr_hook env sigma type_;
+        kind = Definition {value = !print_constr_hook env sigma value};
+      }
+end
+
+module Goal = struct
+  type t = {
+    hyps : Hyp.t list;
+    concl : Constrextern.PrintingVariants.t;
+  } [@@deriving yojson { variants = `Internal "type" }]
+
+  let make sigma g =
+    let EvarInfo evi = Evd.find sigma g in
+    let env = Evd.evar_filtered_env (Global.env ()) evi in
+    let ctxt = EConstr.named_context env in
+    let concl =
+      match Evd.evar_body evi with
+      | Evd.Evar_empty -> Evd.evar_concl evi
+      | Evd.Evar_defined b -> Retyping.get_type_of env sigma b
+    in
+    {
+      hyps = ctxt |> List.map (Hyp.make env sigma);
+      concl = !print_constr_hook env sigma concl;
+    }
+end
+
+module Event = struct
+  type t =
+    | Sequence of {elements : t list}
+    | Dispatch of {
+      goals_before : Goal.t list;
+      branches : t list;
+    }
+    | Tactic of {
+      goals_before : Goal.t list;
+      goals_after : Goal.t list;
+      kind : Proofview_monad.Info.tactic_kind;
+      tactic : Constrextern.PrintingVariants.t;
+      details : t;
+    }
+    | Message of {message : string}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  let rec of_trace = function
+    | Proofview_monad.Info.Sequence brs ->
+      Sequence {elements = brs |> List.map of_trace}
+    | Proofview_monad.Info.Dispatch (saved_proofview_before, brs) ->
+      Dispatch {
+        goals_before = snd saved_proofview_before |> List.map (Goal.make (fst saved_proofview_before));
+        branches = brs |> List.map of_trace;
+      }
+    | Proofview_monad.Info.Tactic (saved_proofview_before, saved_proofview_after, kind, m, c) ->
+      Tactic {
+        goals_before = snd saved_proofview_before |> List.map (Goal.make (fst saved_proofview_before));
+        goals_after = snd saved_proofview_after |> List.map (Goal.make (fst saved_proofview_after));
+        kind = kind;
+        tactic = Constrextern.PrintingVariants.make m;
+        details = of_trace c;
+      }
+    | Proofview_monad.Info.Message m ->
+      Message {message = m () |> Pp.simple_string_of_ppcmds}
+end
+
+let root_tactic = ref None
+let printed_root_tactic = ref None
+let event = ref None
+
 let start ~name ~poly ?typing_flags sigma goals =
   let entry, proofview = Proofview.init sigma goals in
   let pr =
@@ -470,10 +562,8 @@ let solve ?with_end_tac gi info_lvl tac pr =
     let tac = match with_end_tac with
       | None -> tac
       | Some etac -> Proofview.tclTHEN tac etac in
-    let tac = match info_lvl with
-      | None -> tac
-      | Some _ -> Proofview.Trace.with_recording true tac
-    in
+    let record_trace = Option.has_some info_lvl || !Flags.tracing in
+    let tac = if record_trace then Proofview.Trace.with_recording true tac else tac in
     let nosuchgoal =
       let info = Exninfo.reify () in
       Proofview.tclZERO ~info (SuggestNoSuchGoals (1,pr))
@@ -486,7 +576,16 @@ let solve ?with_end_tac gi info_lvl tac pr =
     in
     let env = Global.env () in
     let env = Environ.update_typing_flags ?typing_flags:pr.typing_flags env in
+    root_tactic := None;
     let (p,(status,info),()) = run_tactic env tac pr in
+    if !Flags.tracing && !root_tactic <> None then begin
+      Option.assign printed_root_tactic (!root_tactic |> Option.get |> Constrextern.PrintingVariants.make);
+      Option.assign event (
+        if !Flags.tracing_no_event
+        then Event.Sequence {elements = []}
+        else info |> Event.of_trace
+      )
+    end;
     let () =
       match info_lvl with
       | None -> ()

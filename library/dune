@@ -3,7 +3,8 @@
  (synopsis "Coq's Loadable Libraries (vo) Support")
  (public_name coq-core.library)
  (wrapped false)
- (libraries kernel))
+ (libraries kernel yojson ppx_deriving_yojson)
+ (preprocess (pps ppx_deriving_yojson)))
 
 (documentation
  (package coq-core))

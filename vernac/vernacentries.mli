@@ -8,12 +8,65 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+module Step : sig
+  type kind =
+    | Tactic of {
+        raw : string;
+        tactic : Constrextern.PrintingVariants.t;
+        event : Proof.Event.t;
+      }
+    | StartSubproof
+    | EndSubproof
+    | Bullet of {bullet : Proof_bullet.t}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    goals_before : Proof.Goal.t list;
+    goals_after : Proof.Goal.t list;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
+val current_name : Names.Id.t option ref
+val current_type : Constrexpr.constr_expr option ref
+val current_steps : Step.t list ref
+
+val record_step : Proof.t -> Proof.t -> Step.kind -> unit
+
 val check_may_eval :
   Environ.env ->
   Evd.evar_map ->
   Genredexpr.raw_red_expr option ->
   Constrexpr.constr_expr ->
   Pp.t
+
+module Declaration : sig
+  type outcome =
+    | Admitted
+    | Proved
+    | Exact
+    | Fail
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type kind =
+    | Assumption
+    | Definition of {value : Constrextern.PrintingVariants.t}
+    | Interactive of {
+        steps : Step.t list;
+        outcome : outcome;
+      }
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    path : Libnames.full_path;
+    type_ : Constrextern.PrintingVariants.t;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
+val declarations : Declaration.t list ref
+
+val end_proof : Declaration.outcome -> unit
 
 (** Vernac Translation into the Vernac DSL *)
 val translate_vernac

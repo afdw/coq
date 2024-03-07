@@ -97,6 +97,89 @@ let with_section_locality ~atts f =
   let section_local = make_section_locality local in
   f ~section_local
 
+let print_constr env sigma e = Constrextern.PrintingVariants.make (fun () -> e |> Printer.pr_econstr_env env sigma)
+
+let print_constr_expr env sigma e = Constrextern.PrintingVariants.make (fun () -> e |> Ppconstr.pr_constr_expr env sigma)
+
+let () = Proof.print_constr_hook := print_constr
+
+module Step = struct
+  type kind =
+    | Tactic of {
+        raw : string;
+        tactic : Constrextern.PrintingVariants.t;
+        event : Proof.Event.t;
+      }
+    | StartSubproof
+    | EndSubproof
+    | Bullet of {bullet : Proof_bullet.t}
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    goals_before : Proof.Goal.t list;
+    goals_after : Proof.Goal.t list;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
+let current_name = ref None
+let current_type = ref None
+let current_steps = ref []
+
+let record_step proof_before proof_after kind =
+  let Proof.{sigma = sigma_before; goals = goals_before; _} = proof_before |> Proof.data in
+  let Proof.{sigma = sigma_after; goals = goals_after; _} = proof_after |> Proof.data in
+  current_steps := !current_steps @ [Step.{
+    goals_before = goals_before |> List.map (Proof.Goal.make sigma_before);
+    goals_after = goals_after |> List.map (Proof.Goal.make sigma_after);
+    kind = kind;
+  }]
+
+module Declaration = struct
+  type outcome =
+    | Admitted
+    | Proved
+    | Exact
+    | Fail
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type kind =
+    | Assumption
+    | Definition of {value : Constrextern.PrintingVariants.t}
+    | Interactive of {
+        steps : Step.t list;
+        outcome : outcome;
+      }
+    [@@deriving yojson { variants = `Internal "type" }]
+
+  type t = {
+    path : Libnames.full_path;
+    type_ : Constrextern.PrintingVariants.t;
+    kind : kind;
+  } [@@deriving yojson { variants = `Internal "type" }]
+end
+
+let declarations = ref []
+
+let end_proof outcome =
+  if !Flags.tracing_interactive then
+    Feedback.msg_info Pp.(str "Recorded steps:" ++ spc () ++ int (!current_steps |> List.length));
+  if !Flags.tracing && !current_type <> None then begin
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    declarations := !declarations @ [Declaration.{
+      path = Libnames.make_path (Global.current_dirpath ()) (!current_name |> Option.get);
+      type_ = !current_type |> Option.get |> print_constr_expr env sigma;
+      kind = Interactive {
+        steps = !current_steps;
+        outcome;
+      };
+    }]
+  end;
+  current_name := None;
+  current_type := None;
+  current_steps := []
+
 (*******************)
 (* "Show" commands *)
 
@@ -627,10 +710,13 @@ let start_lemma_com ~typing_flags ~program_mode ~poly ~scope ?clearbody ~kind ?u
   let flags = Pretyping.{ all_no_fail_flags with program_mode } in
   let udecls = List.map (fun ((_,univs),_) -> univs) thms in
   let evd, udecl = Constrintern.interp_mutual_univ_decl_opt env0 udecls in
+  let thm_type = List.hd thms |> snd |> snd in
   let evd, thms = interp_lemma ~program_mode ~flags ~scope env0 evd thms in
+  let thm_name = List.hd thms |> Declare.CInfo.get_name in
   let mut_analysis = RecLemmas.look_for_possibly_mutual_statements evd thms in
   let evd = Evd.minimize_universes evd in
   let info = Declare.Info.make ?hook ~poly ~scope ?clearbody ~kind ~udecl ?typing_flags ?user_warns () in
+  let r =
   begin
     match mut_analysis with
     | RecLemmas.NonMutual thm ->
@@ -643,7 +729,11 @@ let start_lemma_com ~typing_flags ~program_mode ~poly ~scope ?clearbody ~kind ?u
       Declare.Proof.start_mutual_with_initialization ~info ~cinfo evd ~mutual_info (Some possible_guards)
   end
   (* XXX: This should be handled in start_with_initialization, see duplicate using in declare.ml *)
-  |> vernac_set_used_variables_opt ?using
+  |> vernac_set_used_variables_opt ?using in
+  Option.assign current_type thm_type;
+  Option.assign current_name thm_name;
+  assert (!current_steps = []);
+  r
 
 let vernac_definition_hook ~canonical_instance ~local ~poly ~reversible = let open Decls in function
 | Coercion ->
@@ -701,6 +791,7 @@ let vernac_definition ~atts ~pm (discharge, kind) (lid, pl) bl red_option c typ_
       let env = Global.env () in
       let sigma = Evd.from_env env in
       Some (snd (Hook.get f_interp_redexp env sigma r)) in
+  let r =
   if program_mode then
     let kind = Decls.IsDefinition kind in
     ComDefinition.do_definition_program ~pm ~name:name.v
@@ -711,7 +802,20 @@ let vernac_definition ~atts ~pm (discharge, kind) (lid, pl) bl red_option c typ_
       ComDefinition.do_definition ~name:name.v
         ?clearbody:atts.clearbody ~poly:atts.polymorphic ?typing_flags ~scope ~kind ?using:atts.using
         ?user_warns:atts.user_warns pl bl red_option c typ_opt ?hook in
-    pm
+    pm in
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
+  declarations := !declarations @ [Declaration.{
+    path = Libnames.make_path (Global.current_dirpath ()) name.v;
+    type_ =
+      typ_opt
+        |> Option.map (print_constr_expr env sigma)
+        |> Option.default (Constrextern.PrintingVariants.make (fun () -> Pp.str "_"));
+    kind = Definition {
+      value = print_constr_expr env sigma c;
+    };
+  }];
+  r
 
 (* NB: pstate argument to use combinators easily *)
 let vernac_start_proof ~atts kind l =
@@ -747,7 +851,18 @@ let vernac_assumption ~atts discharge kind l inline =
   let scope = enforce_locality_exp atts.locality discharge in
   if Option.has_some atts.using then
     Attributes.unsupported_attributes [CAst.make ("using",VernacFlagEmpty)];
-  ComAssumption.do_assumptions ~poly:atts.polymorphic ~program_mode:atts.program ~scope ~kind ?user_warns:atts.user_warns ~inline l
+  ComAssumption.do_assumptions ~poly:atts.polymorphic ~program_mode:atts.program ~scope ~kind ?user_warns:atts.user_warns ~inline l;
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
+  l |> List.iter (fun (_, (names, c)) ->
+    names |> List.iter (fun (name, _) ->
+      declarations := !declarations @ [Declaration.{
+        path = Libnames.make_path (Global.current_dirpath ()) name.v;
+        type_ = print_constr_expr env sigma c;
+        kind = Assumption;
+      }]
+    )
+  )
 
 let { Goptions.get = is_polymorphic_inductive_cumulativity } =
   declare_bool_option_and_ref
@@ -2134,22 +2249,31 @@ let subproof_cond = Proof.done_cond subproof_kind
 
 let vernac_subproof gln ~pstate =
   Declare.Proof.map ~f:(fun p ->
-    match gln with
+    let p' = match gln with
     | None -> Proof.focus subproof_cond () 1 p
     | Some (Goal_select.SelectNth n) -> Proof.focus subproof_cond () n p
     | Some (Goal_select.SelectId id) -> Proof.focus_id subproof_cond () id p
     | _ -> user_err
-             (str "Brackets do not support multi-goal selectors."))
+             (str "Brackets do not support multi-goal selectors.") in
+    if !Flags.tracing then
+      record_step p p' Step.StartSubproof;
+    p')
     pstate
 
 let vernac_end_subproof ~pstate =
   Declare.Proof.map ~f:(fun p ->
-      Proof.unfocus subproof_kind p ())
+      let p' = Proof.unfocus subproof_kind p () in
+      if !Flags.tracing then
+        record_step p p' Step.EndSubproof;
+      p')
     pstate
 
 let vernac_bullet (bullet : Proof_bullet.t) ~pstate =
   Declare.Proof.map ~f:(fun p ->
-    Proof_bullet.put p bullet) pstate
+    let p' = Proof_bullet.put p bullet in
+    if !Flags.tracing then
+      record_step p p' (Step.Bullet {bullet});
+    p') pstate
 
 (* Stack is needed due to show proof names, should deprecate / remove
    and take pstate *)
@@ -2350,6 +2474,7 @@ let translate_pure_vernac ?loc ~atts v = let open Vernactypes in match v with
   | VernacExactProof c ->
     vtcloseproof (fun ~lemma ->
         unsupported_attributes atts;
+        end_proof Declaration.Exact;
         vernac_exact_proof ~lemma c)
 
   | VernacAssumption ((discharge,kind),nl,l) ->
@@ -2597,7 +2722,10 @@ let translate_pure_vernac ?loc ~atts v = let open Vernactypes in match v with
 
   | VernacEndProof pe ->
     unsupported_attributes atts;
-    vtcloseproof (vernac_end_proof pe)
+    vtcloseproof (fun ~lemma ~pm ->
+      end_proof (match pe with Admitted -> Declaration.Admitted | Proved _ -> Declaration.Proved);
+      vernac_end_proof pe ~lemma ~pm
+    )
 
   | VernacAbort ->
     unsupported_attributes atts;

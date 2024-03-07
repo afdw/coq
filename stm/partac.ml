@@ -114,7 +114,7 @@ end = struct (* {{{ *)
             Declare.Proof.map pstate ~f:(Proof.focus focus_cond () r_goalno) in
           let pstate =
             ComTactic.solve ~pstate
-              Goal_select.SelectAll ~info:None tactic ~with_end_tac:false in
+              Goal_select.SelectAll ~info:None ~print:(fun () -> assert false) tactic ~with_end_tac:false in
           let { Proof.sigma } = Declare.Proof.fold pstate ~f:Proof.data in
           let EvarInfo evi = Evd.find sigma r_goal in
           match Evd.(evar_body evi) with
