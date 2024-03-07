@@ -8,12 +8,66 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+module Goal : sig
+  type hyp =
+    | Assum of {name : string; type_ : Constrextern.PrintingVariants.t}
+    | Def of {name : string; type_ : Constrextern.PrintingVariants.t; value : Constrextern.PrintingVariants.t}
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+
+  type t = {
+    hyps : hyp list;
+    concl : Constrextern.PrintingVariants.t;
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+
+  val make : Evd.evar_map -> Evar.t -> t
+end
+
+module Step : sig
+  type kind =
+    | Tactic of {
+        raw : string;
+        tactic : Constrextern.PrintingVariants.t;
+        event : Constrextern.PrintingVariants.t Proofview_monad.Info.event;
+      }
+    | StartSubproof
+    | EndSubproof
+    | Bullet of Proof_bullet.t
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+
+  type t = {
+    goals_before : Goal.t list;
+    kind: kind;
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+end
+
+val steps : Step.t list ref
+
+val record_step : Proof.t -> Step.kind -> unit
+
 val check_may_eval :
   Environ.env ->
   Evd.evar_map ->
   Genredexpr.raw_red_expr option ->
   Constrexpr.constr_expr ->
   Pp.t
+
+module Theorem : sig
+  type outcome =
+    | Admitted
+    | Proved
+    | Exact
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+
+  type t = {
+    path : Libnames.full_path;
+    steps : Step.t list;
+    outcome : outcome
+  }  [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+end
+
+val theorems : Theorem.t list ref
+
+val end_proof : name:Names.Id.t -> outcome:Theorem.outcome -> unit
 
 (** Vernac Translation into the Vernac DSL *)
 val translate_vernac

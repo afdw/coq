@@ -274,6 +274,10 @@ let end_of_stack = CondEndStack end_of_stack_kind
 
 let unfocused = is_last_focus end_of_stack_kind
 
+let root_tactic = ref None
+let printed_root_tactic = ref None
+let event = ref None
+
 let start ~name ~poly ?typing_flags sigma goals =
   let entry, proofview = Proofview.init sigma goals in
   let pr =
@@ -470,10 +474,8 @@ let solve ?with_end_tac gi info_lvl tac pr =
     let tac = match with_end_tac with
       | None -> tac
       | Some etac -> Proofview.tclTHEN tac etac in
-    let tac = match info_lvl with
-      | None -> tac
-      | Some _ -> Proofview.Trace.record_info_trace tac
-    in
+    let record_trace = Option.has_some info_lvl || !Flags.tracing in
+    let tac = if record_trace then Proofview.Trace.record_info_trace tac else tac in
     let nosuchgoal =
       let info = Exninfo.reify () in
       Proofview.tclZERO ~info (SuggestNoSuchGoals (1,pr))
@@ -486,7 +488,12 @@ let solve ?with_end_tac gi info_lvl tac pr =
     in
     let env = Global.env () in
     let env = Environ.update_typing_flags ?typing_flags:pr.typing_flags env in
+    root_tactic := None;
     let (p,(status,info),()) = run_tactic env tac pr in
+    if !Flags.tracing then begin
+      Option.assign printed_root_tactic (!root_tactic |> Option.get |> Constrextern.PrintingVariants.make);
+      Option.assign event (info |> Proofview_monad.Info.printed Constrextern.PrintingVariants.make)
+    end;
     let env = Global.env () in
     let sigma = Evd.from_env env in
     let () =

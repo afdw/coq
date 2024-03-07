@@ -19,8 +19,8 @@ module Trace : sig
   (** The intent is that an ['a forest] is a list of messages of type
       ['a]. But messages can stand for a list of more precise
       messages, hence the structure is organised as a tree. *)
-  type 'a forest = 'a tree list
-  and  'a tree   = Seq of 'a * 'a forest
+  type 'a forest = 'a tree list [@@deriving yojson]
+  and  'a tree   = Seq of 'a * 'a forest [@@deriving yojson]
 
   (** To build a trace incrementally, we use an intermediary data
       structure on which we can define an S-expression like language
@@ -67,6 +67,14 @@ module Info : sig
       names (if there are fewer, the last name is kept). *)
   val collapse : int -> tree -> tree
 
+  type 'a event =
+    | EventSeq of 'a event list
+    | EventDispatch of 'a event list
+    | EventTactic of 'a * 'a event
+    | EventMsg of string
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+
+  val printed : (lazy_msg -> 'a) -> tree -> 'a event
 end
 
 module StateStore : Store.S
