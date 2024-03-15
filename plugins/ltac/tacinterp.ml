@@ -1800,11 +1800,11 @@ and interp_atomic ist tac : unit Proofview.tactic =
             Tactics.letin_pat_tac ev with_eq na c cl
           in
           let (sigma',c) = interp_pure_open_constr ist env sigma c in
-          name_atomic ~env
+          Tacticals.tclWITHHOLES ev
+          (name_atomic ~env
             (TacLetTac(ev,na,c,clp,b,eqpat))
-            (Tacticals.tclWITHHOLES ev
-               (let_pat_tac b (interp_name ist env sigma na)
-                  (Some sigma,c) clp eqpat) sigma')
+              (let_pat_tac b (interp_name ist env sigma na)
+                (Some sigma,c) clp eqpat)) sigma'
       end
 
   (* Derived basic tactics *)
