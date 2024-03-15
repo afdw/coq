@@ -98,8 +98,11 @@ let pr_generic arg =
     let Val.Dyn (tag, _) = arg in
     str"<" ++ Val.pr tag ++ str ":(" ++ Pptactic.pr_value Pptactic.ltop arg ++ str ")>"
 let pr_appl h vs =
-  Pptactic.pr_ltac_constant  h ++ spc () ++
-  Pp.prlist_with_sep spc pr_generic vs
+  if vs = [] then
+    Pptactic.pr_ltac_constant h
+  else
+    Pptactic.pr_ltac_constant h ++ spc () ++
+    Pp.prlist_with_sep spc (pr_generic) vs
 let rec name_with_list appl t =
   match appl with
   | [] -> t
