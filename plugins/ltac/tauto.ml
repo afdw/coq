@@ -63,6 +63,10 @@ let assoc_flags ist : tauto_flags =
   | None -> assert false
   | Some Refl -> v
 
+let _ =
+  Genprint.register_val_print0 tag_tauto_flags
+    (fun _ -> Genprint.TopPrinterBasic (fun () -> Pp.str "<tauto flags>"))
+
 (* Whether inner not are unfolded *)
 let negation_unfolding = ref true
 
