@@ -70,6 +70,7 @@ module Trace = struct
   open Ppx_yojson_conv_lib.Yojson_conv.Primitives
 
   type t = {
+    sub_filenames : string list;
     theorems : Vernacentries.Theorem.t list;
   } [@@deriving yojson]
 end
@@ -78,6 +79,7 @@ let start_coq custom =
   Flags.tracing_interactive := Sys.getenv_opt "TRACING_INTERACTIVE" |> Option.has_some;
   Flags.tracing_file := Sys.getenv_opt "TRACING_FILE";
   Flags.tracing := !Flags.tracing_interactive || (!Flags.tracing_file |> Option.has_some);
+  Flags.tracing_split := Sys.getenv_opt "TRACING_SPLIT" |> Option.has_some;
   at_exit (fun () ->
     if !Flags.tracing_interactive then
       Feedback.msg_info Pp.(str "Collected theorems:" ++ spc () ++ int (!Vernacentries.theorems |> List.length));
@@ -88,14 +90,34 @@ let start_coq custom =
         let trace =
           if old_contents = "" then
             {
+              Trace.sub_filenames = [];
               Trace.theorems = [];
             }
           else
             old_contents |> Yojson.Safe.from_string |> Trace.t_of_yojson
         in
-        let trace = {
-          Trace.theorems = trace.theorems @ !Vernacentries.theorems
-        } in
+        let trace =
+          if !Flags.tracing_split then
+            let sub_filename =
+              Printf.sprintf "%s-%d-%s.json"
+                (Filename.chop_suffix filename ".json")
+                (List.length trace.sub_filenames)
+                !Flags.tracing_sub_suffix in
+            let sub_trace = {
+              Trace.sub_filenames = [];
+              Trace.theorems = !Vernacentries.theorems;
+            } in
+            let sub_contents = (sub_trace |> Trace.yojson_of_t |> Yojson.Safe.pretty_to_string) ^ "\n" in
+            Out_channel.with_open_text sub_filename (fun oc -> output_string oc sub_contents);
+            {
+              trace with
+              Trace.sub_filenames = trace.sub_filenames @ [sub_filename];
+            }
+          else
+            {
+              trace with
+              Trace.theorems = trace.theorems @ !Vernacentries.theorems;
+            } in
         let new_contents = (trace |> Trace.yojson_of_t |> Yojson.Safe.pretty_to_string) ^ "\n" in
         new_contents
       )

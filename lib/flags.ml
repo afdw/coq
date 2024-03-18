@@ -88,3 +88,5 @@ let output_directory = ref None
 let tracing_interactive = ref false
 let tracing_file = ref None
 let tracing = ref false
+let tracing_split = ref false
+let tracing_sub_suffix = ref "unknown"
