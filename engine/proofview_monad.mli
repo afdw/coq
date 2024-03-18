@@ -12,69 +12,57 @@
     tactic monad, and specialises the [Logic_monad] to these types. It should
     not be used directly. Consider using {!Proofview} instead. *)
 
-(** {6 Traces} *)
-
-module Trace : sig
-
-  (** The intent is that an ['a forest] is a list of messages of type
-      ['a]. But messages can stand for a list of more precise
-      messages, hence the structure is organised as a tree. *)
-  type 'a forest = 'a tree list [@@deriving yojson]
-  and  'a tree   = Seq of 'a * 'a forest [@@deriving yojson]
-
-  (** To build a trace incrementally, we use an intermediary data
-      structure on which we can define an S-expression like language
-      (like a simplified xml except the closing tags do not carry a
-      name). *)
-  type 'a incr
-  val to_tree : 'a incr -> 'a forest
-
-  (** [open a] opens a tag with name [a]. *)
-  val opn : 'a -> 'a incr -> 'a incr
-
-  (** [close] closes the last open tag. It is the responsibility of
-      the user to close all the tags. *)
-  val close : 'a incr -> 'a incr
-
-  (** [leaf] creates an empty tag with name [a]. *)
-  val leaf : 'a -> 'a incr -> 'a incr
-
-end
-
 (** {6 State types} *)
-
-(** We typically label nodes of [Trace.tree] with messages to
-    print. But we don't want to compute the result. *)
-type lazy_msg = unit -> Pp.t
 
 (** Info trace. *)
 module Info : sig
+  type context = Environ.env * Evd.evar_map
 
-  (** The type of the tags for [info]. *)
-  type tag =
-    | Msg of lazy_msg (** A simple message *)
-    | Tactic of lazy_msg (** A tactic call *)
-    | Dispatch  (** A call to [tclDISPATCH]/[tclEXTEND] *)
-    | DBranch  (** A special marker to delimit individual branch of a dispatch. *)
+  (** The type of the tags for [Info]. *)
+  type 'a tag =
+    | Seq of 'a tag list
+    | Dispatch of 'a tag list (** A call to [tclDISPATCHGEN], [tclEXTEND] or [Proofview.Goal.enter] *)
+    | DispatchBranch of 'a tag  (** A special marker to delimit individual branch of a dispatch. *)
+    | Tactic of 'a * 'a tag (** A tactic call *)
+    | Message of 'a (** A simple message *)
+    | Body of 'a tag
+    | Barrier of 'a tag
+    | Context of context * 'a tag
 
-  type state = tag Trace.incr
-  type tree = tag Trace.forest
+  type pretrace = (context -> Pp.t) tag
 
-  val print : Environ.env -> Evd.evar_map -> tree -> Pp.t
+  type stack
+
+  val init : stack
+  val push : pretrace -> stack -> stack
+  val pop : stack -> stack
+  val finalize : stack -> pretrace
+
+  (** We typically label nodes of the trace with messages to
+      print. But we don't want to compute the result. *)
+  type trace = (unit -> Pp.t) tag
+
+  val give_contexts : pretrace -> pretrace
+
+  val apply_contexts : pretrace -> trace
+
+  val compress : trace -> trace
+
+  val print : trace -> Pp.t
 
   (** [collapse n t] flattens the first [n] levels of [Tactic] in an
       info trace, effectively forgetting about the [n] top level of
       names (if there are fewer, the last name is kept). *)
-  val collapse : int -> tree -> tree
+  val collapse : int -> trace -> trace
 
   type 'a event =
     | EventSeq of 'a event list
-    | EventMsg of string
-    | EventTactic of 'a * 'a event
     | EventDispatch of 'a event list
+    | EventTactic of 'a * 'a event
+    | EventMessage of string
     [@@deriving yojson]
 
-  val printed : (lazy_msg -> 'a) -> tree -> 'a event
+  val printed : ((unit -> Pp.t) -> 'a) -> trace -> 'a event
 end
 
 module StateStore : Store.S
@@ -107,7 +95,7 @@ module P : sig
   (** Recording info trace (true) or not. *)
   type e = { trace: bool; name : Names.Id.t; poly : bool }
 
-  type u = Info.state
+  type u = Info.stack
 
   val uunit : u
 end
@@ -153,11 +141,19 @@ module InfoL : sig
   (** [record_trace t] behaves like [t] and compute its [info] trace. *)
   val record_trace : 'a Logical.t -> 'a Logical.t
 
-  val update : (Info.state -> Info.state) -> unit Logical.t
-  val opn : Info.tag -> unit Logical.t
-  val close : unit Logical.t
-  val leaf : Info.tag -> unit Logical.t
+  val update : (Info.stack -> Info.stack) -> unit Logical.t
 
-  (** [tag a t] opens tag [a] runs [t] then closes the tag. *)
-  val tag : Info.tag -> 'a Logical.t -> 'a Logical.t
+  val leaf : Info.pretrace -> unit Logical.t
+
+  (** [tag a t] opens tag [a], runs [t] then closes the tag. *)
+  val tag : Info.pretrace -> 'a Logical.t -> 'a Logical.t
+
+  (* val update : (Info.state -> Info.state) -> unit Logical.t
+
+  val open_ : (Info.context -> Pp.t) Info.tag -> unit Logical.t
+  val close : unit Logical.t
+  val leaf : (Info.context -> Pp.t) Info.tag -> unit Logical.t
+
+  (** [tag a t] opens tag [a], runs [t] then closes the tag. *)
+  val tag : (Info.context -> Pp.t) Info.tag -> 'a Logical.t -> 'a Logical.t *)
 end

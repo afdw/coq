@@ -52,7 +52,7 @@ let with_delayed_uconstr ist c tac =
     patvars_abstract = false;
  } in
   let c = Tacinterp.type_uconstr ~flags ist c in
-  Tacticals.tclDELAYEDWITHHOLES false c tac
+  Tacticals.tclDELAYEDWITHHOLES false c (fun t -> Proofview.Trace.tag_body (tac t))
 
 let replace_in_clause_maybe_by ist c1 c2 cl tac =
   with_delayed_uconstr ist c1
@@ -63,7 +63,7 @@ let replace_term ist dir_opt c cl =
 
 let elimOnConstrWithHoles tac with_evars c =
   Tacticals.tclDELAYEDWITHHOLES with_evars c
-    (fun c -> tac with_evars (Some (None,ElimOnConstr c)))
+    (fun c -> Proofview.Trace.tag_body (tac with_evars (Some (None,ElimOnConstr c))))
 
 let discr_main c = elimOnConstrWithHoles Equality.discr_tac false c
 

@@ -95,9 +95,9 @@ let generic_refine ~typecheck f gl =
   (* Mark goals *)
   let sigma = Proofview.Unsafe.mark_as_goals sigma (Evd.FutureGoals.comb future_goals) in
   let comb = CList.rev_map (fun x -> Proofview.goal_with_state x state) (Evd.FutureGoals.comb future_goals) in
-  let trace () = Pp.(hov 2 (str"simple refine"++spc()++
+  let trace _ _ = Pp.(hov 2 (str"simple refine"++spc()++
                                    Termops.Internal.print_constr_env env sigma c)) in
-  Proofview.Trace.name_tactic trace (Proofview.tclUNIT v) >>= fun v ->
+  Proofview.Trace.tag_tactic trace (Proofview.tclUNIT v) >>= fun v ->
   Proofview.Unsafe.tclSETENV (Environ.reset_context env) <*>
   Proofview.Unsafe.tclEVARS sigma <*>
   Proofview.Unsafe.tclSETGOALS comb <*>

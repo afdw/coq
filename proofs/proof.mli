@@ -174,7 +174,7 @@ val no_focused_goal : t -> bool
    used. In which case it is [false]. *)
 val run_tactic
   :  Environ.env
-  -> 'a Proofview.tactic -> t -> t * (bool*Proofview_monad.Info.tree) * 'a
+  -> 'a Proofview.tactic -> t -> t * (bool * Proofview_monad.Info.trace) * 'a
 
 val maximal_unfocus : 'a focus_kind -> t -> t
 

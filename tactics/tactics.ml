@@ -1016,7 +1016,7 @@ let reduce redexp cl =
   | ExtraRedExpr _ -> StableHypConv (* Should we be that lenient ?*)
   in
   let redexp = Redexpr.eval_red_expr env redexp in
-  Proofview.Trace.name_tactic (fun () -> trace env sigma) begin
+  Proofview.Trace.tag_tactic (fun _ _ -> trace env sigma) begin
   begin match cl.concl_occs with
   | NoOccurrences -> Proofview.tclUNIT ()
   | occs ->
@@ -2314,7 +2314,7 @@ let split_with_bindings with_evars l =
   Tacticals.tclMAP (constructor_tac with_evars (Some 1) 1) l
 let split_with_delayed_bindings with_evars bl =
   Tacticals.tclMAPDELAYEDWITHHOLES with_evars bl
-    (constructor_tac with_evars (Some 1) 1)
+    (fun b -> Proofview.Trace.tag_body (constructor_tac with_evars (Some 1) 1 b))
 
 let left           = left_with_bindings false
 let simplest_left  = left NoBindings

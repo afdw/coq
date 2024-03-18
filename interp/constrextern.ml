@@ -1649,27 +1649,28 @@ struct
     let features = ref Libnames.Fset.empty in
     run_low_level (fun () ->
       Flags.with_modified_ref
-      my_extern_reference (fun old_extern_reference ?loc vars r ->
-        (match r with
-        | VarRef _ -> ()
-        | ConstRef const ->
-          features := !features |> Libnames.Fset.add (Libnames.Feature.FeatureConstRef {
-            path = Nametab.path_of_global (ConstRef const);
-          })
-        | IndRef ind ->
-          features := !features |> Libnames.Fset.add (Libnames.Feature.FeatureIndRef {
-            path = Nametab.path_of_global (IndRef ind);
-          })
-        | ConstructRef ((ind, _) as constructor) ->
-          features := !features |> Libnames.Fset.add (Libnames.Feature.FeatureConstructRef {
-            ind_path = Nametab.path_of_global (IndRef ind);
-            path = Nametab.path_of_global (ConstructRef constructor);
-          })
-        );
-        old_extern_reference ?loc vars r
-      )
-      (fun _ -> f () |> ignore)
-      ()
+        my_extern_reference
+        (fun old_extern_reference ?loc vars r ->
+          (match r with
+          | VarRef _ -> ()
+          | ConstRef const ->
+            features := !features |> Libnames.Fset.add (Libnames.Feature.FeatureConstRef {
+              path = Nametab.path_of_global (ConstRef const);
+            })
+          | IndRef ind ->
+            features := !features |> Libnames.Fset.add (Libnames.Feature.FeatureIndRef {
+              path = Nametab.path_of_global (IndRef ind);
+            })
+          | ConstructRef ((ind, _) as constructor) ->
+            features := !features |> Libnames.Fset.add (Libnames.Feature.FeatureConstructRef {
+              ind_path = Nametab.path_of_global (IndRef ind);
+              path = Nametab.path_of_global (ConstructRef constructor);
+            })
+          );
+          old_extern_reference ?loc vars r
+        )
+        (fun _ -> f () |> ignore)
+        ()
     );
     {
       default = run_default g;

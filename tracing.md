@@ -54,13 +54,13 @@ module Info : sig
   type event =
     | EventSeq of event list
       (** Events generated sequentially, one after another. *)
-    | EventMsg of string
-      (** A message was produced. *)
-    | EventTactic of PrintingVariants.t * event
-      (** A tactic was generated, and is course of action is detailed in the event. *)
     | EventDispatch of event list
       (** Events generated in parallel in terms of goals,
           the list contains events about each of the current goals. *)
+    | EventTactic of Goal list * PrintingVariants.t * event
+      (** A tactic was generated, and is course of action is detailed in the event. *)
+    | EventMessage of string
+      (** A message was produced. *)
 end
 
 (** A proof bullet, for example, [Star 3] is "***". *)
@@ -77,7 +77,7 @@ module Step : sig
     | Tactic of {
         raw : string; (** The tactic, almost exactly as it was written by the user. *)
         tactic : PrintingVariants.t; (** The tactic printed different ways. *)
-        event : PrintingVariants.t Info.event; (** How it executed. *)
+        event : Info.event; (** How it executed. *)
       }
     | StartSubproof (** { *)
     | EndSubproof (** } *)

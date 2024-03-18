@@ -130,14 +130,14 @@ let string_of_genarg_arg (ArgumentType arg) =
   | None -> assert false
   | Some Refl -> x
 
-  let rec pr_value lev v : Pp.t =
+  let rec pr_value env sigma lev v : Pp.t =
     if has_type v Val.typ_list then
-      pr_sequence (fun x -> pr_value lev x) (unbox v Val.typ_list)
+      pr_sequence (fun x -> pr_value env sigma lev x) (unbox v Val.typ_list)
     else if has_type v Val.typ_opt then
-      pr_opt_no_spc (fun x -> pr_value lev x) (unbox v Val.typ_opt)
+      pr_opt_no_spc (fun x -> pr_value env sigma lev x) (unbox v Val.typ_opt)
     else if has_type v Val.typ_pair then
       let (v1, v2) = unbox v Val.typ_pair in
-      str "(" ++ pr_value lev v1 ++ str ", " ++ pr_value lev v2 ++ str ")"
+      str "(" ++ pr_value env sigma lev v1 ++ str ", " ++ pr_value env sigma lev v2 ++ str ")"
     else
       let Val.Dyn (tag, x) = v in
       let name = Val.repr tag in
@@ -155,11 +155,9 @@ let string_of_genarg_arg (ArgumentType arg) =
              match generic_top_print (in_gen (Topwit wit) x) with
              | TopPrinterBasic pr -> pr ()
              | TopPrinterNeedsContext pr ->
-               let env = Global.env() in
-               pr env (Evd.from_env env)
+               pr env sigma
              | TopPrinterNeedsContextAndLevel { default_ensure_surrounded; printer } ->
-               let env = Global.env() in
-               printer env (Evd.from_env env) default_ensure_surrounded
+               printer env sigma default_ensure_surrounded
           end
         | _ -> default
 

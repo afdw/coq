@@ -490,16 +490,14 @@ let solve ?with_end_tac gi info_lvl tac pr =
     let env = Environ.update_typing_flags ?typing_flags:pr.typing_flags env in
     root_tactic := None;
     let (p,(status,info),()) = run_tactic env tac pr in
-    if !Flags.tracing then begin
+    if !Flags.tracing && !root_tactic <> None then begin
       Option.assign printed_root_tactic (!root_tactic |> Option.get |> Constrextern.PrintingVariants.make);
       Option.assign event (info |> Proofview_monad.Info.printed Constrextern.PrintingVariants.make)
     end;
-    let env = Global.env () in
-    let sigma = Evd.from_env env in
     let () =
       match info_lvl with
       | None -> ()
-      | Some i -> Feedback.msg_info (Pp.hov 0 (Proofview.Trace.pr_info env sigma ~lvl:i info))
+      | Some i -> Feedback.msg_info (Pp.hov 0 (Proofview.Trace.pr_info ~lvl:i info))
     in
     (p,status)
 
