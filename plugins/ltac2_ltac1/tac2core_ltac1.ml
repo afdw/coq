@@ -71,7 +71,7 @@ let () =
   let lfun = Id.Map.add (Id.of_string "F") f lfun in
   let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun = lfun; } in
   let tac = CAst.make @@ TacArg (TacCall (CAst.make (ArgVar CAst.(make @@ Id.of_string "F"),args))) in
-  Tacinterp.val_interp ist tac k
+  Tacinterp.val_interp_tactic ist tac k
 
 let () =
   define "ltac1_of_int" (int @-> ret ltac1)

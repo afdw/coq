@@ -11,169 +11,150 @@
 (** This file defines the datatypes used as internal states by the
     tactic monad, and specialises the [Logic_monad] to these type. *)
 
-(** {6 Trees/forest for traces} *)
-
-module Trace = struct
-  (** The intent is that an ['a forest] is a list of messages of type
-      ['a]. But messages can stand for a list of more precise
-      messages, hence the structure is organised as a tree. *)
-  type 'a forest = 'a tree list [@@deriving yojson]
-  and  'a tree   = Seq of 'a * 'a forest [@@deriving yojson]
-
-  (** To build a trace incrementally, we use an intermediary data
-      structure on which we can define an S-expression like language
-      (like a simplified xml except the closing tags do not carry a
-      name). Note that nodes are built from right to left in ['a
-      incr], the result is mirrored when returning so that in the
-      exposed interface, the forest is read from left to right.
-
-      Concretely, we want to add a new tree to a forest: and we are
-      building it by adding new trees to the left of its left-most
-      subtrees which is built the same way. *)
-  type 'a incr = { head:'a forest ; opened: 'a tree list }
-
-  (** S-expression like language as ['a incr] transformers. It is the
-      responsibility of the library builder not to use [close] when no
-      tag is open. *)
-  let empty_incr = { head=[] ; opened=[] }
-  let opn a { head ; opened } = { head ; opened = Seq(a,[])::opened }
-  let close { head ; opened } =
-    match opened with
-    | [a] -> { head = a::head ; opened=[] }
-    | a::Seq(b,f)::opened -> { head ; opened=Seq(b,a::f)::opened }
-    | [] -> assert false
-  let leaf a s = close (opn a s)
-
-  (** Returning a forest. It is the responsibility of the library
-      builder to close all the tags. *)
-  (* spiwack: I may want to close the tags instead, to deal with
-     interruptions. *)
-  let rec mirror f = List.rev_map mirror_tree f
-  and mirror_tree (Seq(a,f)) = Seq(a,mirror f)
-
-  let to_tree = function
-    | { head ; opened=[] } -> mirror head
-    | { head ; opened=_::_} -> assert false
-
-end
-
-
-
 (** {6 State types} *)
-
-(** We typically label nodes of [Trace.tree] with messages to
-    print. But we don't want to compute the result. *)
-type lazy_msg = unit -> Pp.t
 
 (** Info trace. *)
 module Info = struct
 
-  (** The type of the tags for [info]. *)
-  type tag =
-    | Msg of lazy_msg (** A simple message *)
-    | Tactic of lazy_msg (** A tactic call *)
-    | Dispatch  (** A call to [tclDISPATCH]/[tclEXTEND] *)
-    | DBranch  (** A special marker to delimit individual branch of a dispatch. *)
+  type context = Environ.env * Evd.evar_map
 
-  type state = tag Trace.incr
-  type tree = tag Trace.forest
+  (** The type of the tags for [Info]. *)
+  type 'a tag =
+    | Seq of 'a tag list
+    | Dispatch of 'a tag list (** A call to [tclDISPATCHGEN], [tclEXTEND] or [Proofview.Goal.enter] *)
+    | DispatchBranch of 'a tag  (** A special marker to delimit individual branch of a dispatch. *)
+    | Tactic of 'a * 'a tag (** A tactic call *)
+    | Message of 'a (** A simple message *)
+    | Body of 'a tag
+    | Barrier of 'a tag
+    | Context of context * 'a tag
 
-  let pr_in_comments m = Pp.(str"(* "++ m () ++str" *)")
+  type pretrace = (context -> Pp.t) tag
 
-  let unbranch = function
-    | Trace.Seq (DBranch,brs) -> brs
+  type stack = pretrace list
+
+  let init = [Seq []]
+  let push b s = b :: s
+  let append a b =
+    match a, b with
+    | Dispatch _, Seq [] -> Seq [a]
+    | DispatchBranch c, Dispatch brs -> Dispatch (brs @ [c])
+    | DispatchBranch _, _ -> assert false
+    | _, Seq [] -> a
+    | _, Seq brs -> Seq (brs @ [a])
+    | _, Dispatch _ -> assert false
+    | _, _ -> Seq [b; a]
+  let pop s =
+    match s with
+    | DispatchBranch c :: Dispatch brs :: s' -> Dispatch (brs @ [c]) :: s'
+    | DispatchBranch _ :: _ :: _ -> assert false
+    | a :: Seq brs :: s' -> Seq (brs @ [a]) :: s'
+    | _ :: Dispatch _ :: _ -> assert false
+    | a :: DispatchBranch c :: s' -> DispatchBranch (append a c) :: s'
+    | a :: Tactic (m, c) :: s' -> Tactic (m, append a c) :: s'
+    | _ :: Message _ :: _ -> assert false
+    | a :: Body c :: s' -> Body (append a c) :: s'
+    | a :: Barrier c :: s' -> Barrier (append a c) :: s'
+    | a :: Context (context, c) :: s' -> Context (context, append a c) :: s'
+    | [_] | [] -> assert false
+  let finalize s =
+    match s with
+    | [b] -> b
     | _ -> assert false
 
+  (** We typically label nodes of [Trace.tree] with messages to
+      print. But we don't want to compute the result. *)
+  type trace = (unit -> Pp.t) tag
 
-  let is_empty_branch = let open Trace in function
-    | Seq(DBranch,[]) -> true
-    | _ -> false
+  let rec give_contexts reconstruct = function
+    | Seq brs ->
+      let brs, given = brs |> List.map (give_contexts reconstruct) |> List.split in
+      Seq brs, given |> List.exists Fun.id
+    | Dispatch brs ->
+      let brs, given = brs |> List.map (give_contexts reconstruct) |> List.split in
+      Dispatch brs, given |> List.exists Fun.id
+    | Tactic (m, c) ->
+      let reconstruct b = reconstruct (Tactic (m, b)) in
+      let c, given = give_contexts reconstruct c in
+      (if given then c else Tactic (m, c)), given
+    | Message m -> Message m, false
+    | Body c -> reconstruct c, true
+    | Barrier c ->
+      let c, _given = give_contexts Fun.id c in
+      c, false
+    | Context (context, c) ->
+      let c, given = give_contexts reconstruct c in
+      Context (context, c), given
+    | DispatchBranch _ -> assert false
+  let give_contexts b =
+    let b, _given = give_contexts Fun.id b in
+    b
 
-  (** Dispatch with empty branches are (supposed to be) equivalent to
-      [idtac] which need not appear, so they are removed from the
-      trace. *)
-  let dispatch brs =
-    let open Trace in
-    if CList.for_all is_empty_branch brs then None
-    else Some (Seq(Dispatch,brs))
+  let rec apply_contexts context = function
+    | Seq brs -> Seq (brs |> List.map (apply_contexts context))
+    | Dispatch brs -> Dispatch (brs |> List.map (apply_contexts context))
+    | Tactic (m, c) -> Tactic ((fun () -> m (Option.get context)), apply_contexts context c)
+    | Message m -> Message (fun () -> m (Option.get context))
+    | Context (context, c) -> apply_contexts (Some context) c
+    | DispatchBranch _ | Body _ | Barrier _ -> assert false
+  let apply_contexts = apply_contexts None
 
-  let constr = let open Trace in function
-    | Dispatch -> dispatch
-    | t -> fun br -> Some (Seq(t,br))
+  let rec compress = function
+    | Seq [c] -> compress c
+    | Seq brs ->
+      Seq (
+        brs
+          |> List.map compress
+          |> List.map (function
+              | Seq brs -> brs
+              | b -> [b]
+            )
+          |> List.flatten
+      )
+    | Dispatch [c] -> compress c
+    | Dispatch brs ->
+      let brs = brs |> List.map compress in
+      let all_empty = brs |> List.for_all (fun e -> match e with Seq [] -> true | _ -> false) in
+      if all_empty then Seq [] else Dispatch brs
+    | Tactic (m, c) -> Tactic (m, compress c)
+    | Message m -> Message m
+    | DispatchBranch _ | Body _ | Barrier _ | Context _ -> assert false
 
-  let rec compress_tree = let open Trace in function
-    | Seq(t,f) -> constr t (compress f)
-  and compress f =
-    CList.map_filter compress_tree f
+  let rec print = let open Pp in function
+    | Seq brs ->
+      let sep () = spc () ++ str ";" ++ spc () in
+      if brs = []
+      then str "idtac"
+      else brs |> Pp.prlist_with_sep sep print
+    | Dispatch brs ->
+      let sep () = spc () ++ str "|" ++ spc () in
+      if brs = []
+      then str "idtac"
+      else str "[>" ++ spc () ++ (brs |> Pp.prlist_with_sep sep print) ++ spc () ++ str "]"
+    | Tactic (m, _) -> m ()
+    | Message m -> str "(* " ++ m () ++ str " *)"
+    | DispatchBranch _ | Body _ | Barrier _ | Context _ -> assert false
 
-  (** [with_sep] is [true] when [Tactic m] must be printed with a
-      trailing semi-colon. *)
-  let rec pr_tree with_sep = let open Trace in function
-    | Seq (Msg m,[]) -> pr_in_comments m
-    | Seq (Tactic m,_) ->
-        let tail = if with_sep then Pp.str";" else Pp.mt () in
-        Pp.(m () ++ tail)
-    | Seq (Dispatch,brs) ->
-        let tail = if with_sep then Pp.str";" else Pp.mt () in
-        Pp.(pr_dispatch brs++tail)
-    | Seq (Msg _,_::_) | Seq (DBranch,_) -> assert false
-  and pr_dispatch brs =
-    let open Pp in
-    let brs = List.map unbranch brs in
-    match brs with
-    | [br] -> pr_forest br
-    | _ ->
-        let sep () = spc()++str"|"++spc() in
-        let branches = prlist_with_sep sep pr_forest brs in
-        str"[>"++spc()++branches++spc()++str"]"
-  and pr_forest = function
-    | [] -> Pp.mt ()
-    | [tr] -> pr_tree false tr
-    | tr::l -> Pp.(pr_tree true tr ++ pr_forest l)
-
-  let print _env _sigma f =
-    pr_forest (compress f)
-
-  let rec collapse_tree n t =
-    let open Trace in
-    match n , t with
-    | 0 , t -> [t]
-    | _ , (Seq(Tactic _,[]) as t) -> [t]
-    | n , Seq(Tactic _,f) -> collapse (pred n) f
-    | n , Seq(Dispatch,brs) -> [Seq(Dispatch, (collapse n brs))]
-    | n , Seq(DBranch,br) -> [Seq(DBranch, (collapse n br))]
-    | _ , (Seq(Msg _,_) as t) -> [t]
-  and collapse n f =
-    CList.map_append (collapse_tree n) f
+  let rec collapse n = function
+    | Seq brs -> Seq (brs |> List.map (collapse n))
+    | Dispatch brs -> Dispatch (brs |> List.map (collapse n))
+    | Tactic (m, c) -> if n > 0 then collapse (n - 1) c else Tactic (m, Seq [])
+    | Message m -> Message m
+    | DispatchBranch _ | Body _ | Barrier _ | Context _ -> assert false
 
   type 'a event =
     | EventSeq of 'a event list
     | EventDispatch of 'a event list
     | EventTactic of 'a * 'a event
-    | EventMsg of string
+    | EventMessage of string
     [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
-  let rec printed_tree f = let open Trace in function
-    | Seq (Msg m, []) -> EventMsg (m () |> Pp.single_line_string_of_ppcmds)
-    | Seq (Tactic m, brs) -> EventTactic (f m, printed f brs)
-    | Seq (Dispatch, brs) ->
-      let brs = brs |> List.map unbranch in
-      (match brs with
-      | [b] -> printed f b
-      | brs ->
-        let es = brs |> List.map (printed f) in
-        let all_empty = es |> List.for_all (fun e -> match e with EventSeq [] -> true | _ -> false) in
-        if all_empty then EventSeq [] else EventDispatch es)
-    | Seq (Msg _, _ :: _) | Seq (DBranch, _) -> assert false
-
-  and printed f = function
-    | [b] -> printed_tree f b
-    | l ->
-      let es = l |> List.map (printed_tree f) in
-      let filtered_es = es |> List.filter (fun e -> match e with EventSeq [] -> false | _ -> true) in
-      match filtered_es with
-      | [e] -> e
-      | es -> EventSeq es
+  let rec printed f = function
+    | Seq brs -> EventSeq (brs |> List.map (printed f))
+    | Dispatch brs -> EventDispatch (brs |> List.map (printed f))
+    | Tactic (m, c) -> EventTactic (f m, printed f c)
+    | Message m -> EventMessage (m () |> Pp.single_line_string_of_ppcmds)
+    | DispatchBranch _ | Body _ | Barrier _ | Context _ -> assert false
 end
 
 module StateStore = Store.Make()
@@ -212,9 +193,9 @@ module P = struct
   let wunit = true
   let wprod b1 b2 = b1 && b2
 
-  type u = Info.state
+  type u = Info.stack
 
-  let uunit = Trace.empty_incr
+  let uunit = Info.init
 
 end
 
@@ -273,30 +254,39 @@ end
 (** Lens and utilities pertaining to the info trace *)
 module InfoL = struct
   let recording = Logical.(map (fun {P.trace} -> trace) current)
-  let if_recording t =
-    let open Logical in
-    recording >>= fun r ->
-    if r then t else return ()
 
   let record_trace t =
     Logical.(
       current >>= fun s ->
-      local {s with P.trace = true} t)
+      local {s with P.trace = true} t
+    )
 
   let raw_update = Logical.update
-  let update f = if_recording (raw_update f)
-  let opn a = update (Trace.opn a)
-  let close = update Trace.close
-  let leaf a = update (Trace.leaf a)
+  let update f =
+    let open Logical in
+    recording >>= fun r ->
+    if r then
+      raw_update f
+    else
+      return ()
+
+  let leaf a =
+    let open Logical in
+    recording >>= fun r ->
+    if r then
+      raw_update (Info.push a) >>
+      raw_update Info.pop
+    else
+      return ()
 
   let tag a t =
     let open Logical in
     recording >>= fun r ->
-    if r then begin
-      raw_update (Trace.opn a) >>
+    if r then (
+      raw_update (Info.push a) >>
       t >>= fun a ->
-      raw_update Trace.close >>
+      raw_update Info.pop >>
       return a
-    end else
+    ) else
       t
 end

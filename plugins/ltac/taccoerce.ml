@@ -105,7 +105,9 @@ let to_option v = prj Val.typ_opt v
 let to_pair v = prj Val.typ_pair v
 
 let cast_error wit v =
-  let pr_v = Pptactic.pr_value Pptactic.ltop v in
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
+  let pr_v = Pptactic.pr_value env sigma Pptactic.ltop v in
   let Val.Dyn (tag, _) = v in
   let tag = Val.pr tag in
   CErrors.user_err (str "Type error: value " ++ pr_v ++ str " is a " ++ tag
@@ -442,6 +444,10 @@ let (wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type) =
       Genprint.TopPrinterNeedsContext (fun env sigma -> v 0 (hov 0 (Pptactic.pr_glob_tactic env tac) ++ pr_env env sigma))
     | _ -> Genprint.TopPrinterBasic (fun _ -> str "<tactic closure>") in
   let () = Genprint.register_val_print0 (base_val_typ wit) pr in
+  Genprint.register_print0 wit
+  (fun _ -> assert false)
+  (fun _ -> assert false)
+  pr;
   wit
 
 exception CoercionError of Id.t * (Environ.env * Evd.evar_map) option * Val.t * string

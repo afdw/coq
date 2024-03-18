@@ -71,10 +71,10 @@ val type_uconstr :
 val interp_genarg : interp_sign -> glob_generic_argument -> Value.t Ftactic.t
 
 (** Interprets any expression *)
-val val_interp : interp_sign -> glob_tactic_expr -> (value -> unit Proofview.tactic) -> unit Proofview.tactic
+val val_interp_tactic : interp_sign -> glob_tactic_expr -> (value -> unit Proofview.tactic) -> unit Proofview.tactic
 
 (** Interprets an expression that evaluates to a constr *)
-val interp_ltac_constr : interp_sign -> glob_tactic_expr -> (constr -> unit Proofview.tactic) -> unit Proofview.tactic
+val interp_ltac_constr_tactic : interp_sign -> glob_tactic_expr -> (constr -> unit Proofview.tactic) -> unit Proofview.tactic
 
 (** Interprets redexp arguments *)
 val interp_red_expr : interp_sign -> Environ.env -> Evd.evar_map -> Genredexpr.glob_red_expr -> Evd.evar_map * red_expr
