@@ -3,8 +3,10 @@ Tracing
 
 To enable tracing, set one or both of the following environment variables, and then run `coqtop` or `coqc` normally:
 1. `TRACING_INTERACTIVE=1` to print information to the output;
-2. `TRACING_FILE=trace.json` to append the results to the `trace.json` file.
+2. `TRACING_FILE=trace.json` to append the results to the `trace.json` file. The extension of the file should be `.json`,
+   unless `TRACING_COMPRESS=1` is set and `TRACING_SPLIT=1` is not, in which case it should be `.json.zst`.
    1. Use `TRACING_SPLIT=1` to split the output into files.
+   2. Use `TRACING_COMPRESS=1` to compress the output files.
 
 The output has the following structure:
 ```ocaml

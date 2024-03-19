@@ -80,6 +80,7 @@ let start_coq custom =
   Flags.tracing_file := Sys.getenv_opt "TRACING_FILE";
   Flags.tracing := !Flags.tracing_interactive || (!Flags.tracing_file |> Option.has_some);
   Flags.tracing_split := Sys.getenv_opt "TRACING_SPLIT" |> Option.has_some;
+  Flags.tracing_compress := Sys.getenv_opt "TRACING_COMPRESS" |> Option.has_some;
   at_exit (fun () ->
     if !Flags.tracing_interactive then
       Feedback.msg_info Pp.(str "Collected theorems:" ++ spc () ++ int (!Vernacentries.theorems |> List.length));
@@ -94,20 +95,28 @@ let start_coq custom =
               Trace.theorems = [];
             }
           else
-            old_contents |> Yojson.Safe.from_string |> Trace.t_of_yojson
-        in
+            let old_contents =
+              if !Flags.tracing_compress && not !Flags.tracing_split
+              then Zstd.decompress (Zstd.get_decompressed_size old_contents) old_contents
+              else old_contents in
+            old_contents |> Yojson.Safe.from_string |> Trace.t_of_yojson in
         let trace =
           if !Flags.tracing_split then
             let sub_filename =
-              Printf.sprintf "%s-%d-%s.json"
+              Printf.sprintf "%s-%d-%s%s"
                 (Filename.chop_suffix filename ".json")
                 (List.length trace.sub_filenames)
-                !Flags.tracing_sub_suffix in
+                !Flags.tracing_sub_suffix
+                (if !Flags.tracing_compress then ".json.zst" else ".json") in
             let sub_trace = {
               Trace.sub_filenames = [];
               Trace.theorems = !Vernacentries.theorems;
             } in
             let sub_contents = (sub_trace |> Trace.yojson_of_t |> Yojson.Safe.pretty_to_string) ^ "\n" in
+            let sub_contents =
+              if !Flags.tracing_compress
+              then Zstd.compress ~level:15 sub_contents
+              else sub_contents in
             Out_channel.with_open_text sub_filename (fun oc -> output_string oc sub_contents);
             {
               trace with
@@ -119,6 +128,10 @@ let start_coq custom =
               Trace.theorems = trace.theorems @ !Vernacentries.theorems;
             } in
         let new_contents = (trace |> Trace.yojson_of_t |> Yojson.Safe.pretty_to_string) ^ "\n" in
+        let new_contents =
+          if !Flags.tracing_compress && not !Flags.tracing_split
+          then Zstd.compress  ~level:15 new_contents
+          else new_contents in
         new_contents
       )
   );

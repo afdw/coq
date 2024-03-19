@@ -105,3 +105,4 @@ val tracing_file : string option ref
 val tracing : bool ref
 val tracing_split : bool ref
 val tracing_sub_suffix : string ref
+val tracing_compress : bool ref

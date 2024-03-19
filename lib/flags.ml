@@ -90,3 +90,4 @@ let tracing_file = ref None
 let tracing = ref false
 let tracing_split = ref false
 let tracing_sub_suffix = ref "unknown"
+let tracing_compress = ref false
