@@ -67,9 +67,9 @@ let solve ~pstate n ~info ~print t ~with_end_tac =
     });
   if !Flags.tracing_interactive then begin
     Feedback.msg_info Pp.(str "Tactic:" ++ spc () ++ str (!Proof.printed_root_tactic |> Option.get |>
-      Constrextern.PrintingVariants.yojson_of_t |> Yojson.Safe.pretty_to_string));
+      Constrextern.PrintingVariants.to_yojson |> Yojson.Safe.pretty_to_string));
     Feedback.msg_info Pp.(str "Event:" ++ spc () ++ str (!Proof.event |> Option.get |>
-      Proofview_monad.Info.yojson_of_event Constrextern.PrintingVariants.yojson_of_t |> Yojson.Safe.pretty_to_string))
+      Proofview_monad.Info.event_to_yojson Constrextern.PrintingVariants.to_yojson |> Yojson.Safe.pretty_to_string))
   end;
   p
 

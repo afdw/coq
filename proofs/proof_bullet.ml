@@ -8,7 +8,6 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
-open Ppx_yojson_conv_lib.Yojson_conv.Primitives
 open Proof
 
 type t =

@@ -15,8 +15,6 @@
 
 (** Info trace. *)
 module Info = struct
-  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
-
   type context = Environ.env * Evd.evar_map
 
   (** The type of the tags for [Info]. *)

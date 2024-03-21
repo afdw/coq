@@ -35,7 +35,7 @@
   (zarith (>= 1.11))
   (conf-linux-libc-dev (= :os "linux"))
   (yojson (>= 2.1.2))
-  (ppx_yojson_conv (>= 0.16.0))
+  (ppx_deriving_yojson (>= 0.16.0))
   (flock (>= 1.0.0))
   (zstd (>= 0.3)))
  (depopts coq-native)

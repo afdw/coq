@@ -1571,8 +1571,6 @@ let extern_rel_context where env sigma sign =
 
 module PrintingVariants =
 struct
-  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
-
   type t = {
     default : string;
     full_path : string;

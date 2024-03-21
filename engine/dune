@@ -5,5 +5,5 @@
  (wrapped false)
  ; until ocaml/dune#4892 fixed
  ; (private_modules univSubst)
- (libraries library yojson ppx_yojson_conv)
- (preprocess (pps ppx_yojson_conv)))
+ (libraries library yojson ppx_deriving_yojson)
+ (preprocess (pps ppx_deriving_yojson)))

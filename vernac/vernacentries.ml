@@ -98,8 +98,6 @@ let with_section_locality ~atts f =
   f ~section_local
 
 module Goal = struct
-  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
-
   type hyp =
     | Assum of {name : string; type_ : Constrextern.PrintingVariants.t}
     | Def of {name : string; type_ : Constrextern.PrintingVariants.t; value : Constrextern.PrintingVariants.t}
@@ -134,8 +132,6 @@ module Goal = struct
 end
 
 module Step = struct
-  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
-
   type kind =
     | Tactic of {
         raw : string;
@@ -2382,8 +2378,6 @@ let translate_vernac_synterp ?loc ~atts v = let open Vernactypes in match v with
   | EVernacExtend f -> f
 
 module Theorem = struct
-  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
-
   type outcome =
     | Admitted
     | Proved

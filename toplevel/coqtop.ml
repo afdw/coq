@@ -67,8 +67,6 @@ let init_toplevel { parse_extra; init_extra; usage; initial_args } =
   opts, customopts, customstate
 
 module Trace = struct
-  open Ppx_yojson_conv_lib.Yojson_conv.Primitives
-
   type t = {
     sub_filenames : string list;
     theorems : Vernacentries.Theorem.t list;
@@ -99,7 +97,9 @@ let start_coq custom =
               if !Flags.tracing_compress && not !Flags.tracing_split
               then Zstd.decompress (Zstd.get_decompressed_size old_contents) old_contents
               else old_contents in
-            old_contents |> Yojson.Safe.from_string |> Trace.t_of_yojson in
+            match old_contents |> Yojson.Safe.from_string |> Trace.of_yojson with
+            | Ok trace -> trace
+            | Error error -> raise (Failure error) in
         let trace =
           if !Flags.tracing_split then
             let sub_filename =
@@ -112,7 +112,7 @@ let start_coq custom =
               Trace.sub_filenames = [];
               Trace.theorems = !Vernacentries.theorems;
             } in
-            let sub_contents = (sub_trace |> Trace.yojson_of_t |> Yojson.Safe.pretty_to_string) ^ "\n" in
+            let sub_contents = (sub_trace |> Trace.to_yojson |> Yojson.Safe.pretty_to_string) ^ "\n" in
             let sub_contents =
               if !Flags.tracing_compress
               then Zstd.compress ~level:15 sub_contents
@@ -127,7 +127,7 @@ let start_coq custom =
               trace with
               Trace.theorems = trace.theorems @ !Vernacentries.theorems;
             } in
-        let new_contents = (trace |> Trace.yojson_of_t |> Yojson.Safe.pretty_to_string) ^ "\n" in
+        let new_contents = (trace |> Trace.to_yojson |> Yojson.Safe.pretty_to_string) ^ "\n" in
         let new_contents =
           if !Flags.tracing_compress && not !Flags.tracing_split
           then Zstd.compress  ~level:15 new_contents

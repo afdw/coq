@@ -125,13 +125,11 @@ let path_of_string s =
 
 let pr_path sp = Pp.str (string_of_path sp)
 
-let full_path_of_yojson j =
-  let open Ppx_yojson_conv_lib.Yojson_conv.Primitives in
-  j |> string_of_yojson |> path_of_string
+let full_path_to_yojson sp =
+  sp |> string_of_path |> [%to_yojson: string]
 
-let yojson_of_full_path sp =
-  let open Ppx_yojson_conv_lib.Yojson_conv.Primitives in
-  sp |> string_of_path |> yojson_of_string
+let full_path_of_yojson j =
+  j |> [%of_yojson: string] |> Result.map path_of_string
 
 (*s qualified names *)
 type qualid_r = full_path
@@ -197,13 +195,11 @@ end
 module Fset = struct
   include Set.Make(Feature)
 
-  let t_of_yojson j =
-    let open Ppx_yojson_conv_lib.Yojson_conv.Primitives in
-    j |> list_of_yojson Feature.t_of_yojson |> of_list
+  let to_yojson f =
+    f |> to_list |> [%to_yojson: Feature.t list]
 
-  let yojson_of_t f =
-    let open Ppx_yojson_conv_lib.Yojson_conv.Primitives in
-    f |> to_list |> yojson_of_list Feature.yojson_of_t
+  let of_yojson j =
+    j |> [%of_yojson: Feature.t list] |> Result.map of_list
 end
 
 module Fmap = Map.Make(Feature)
