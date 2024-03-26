@@ -12,12 +12,12 @@ module Goal : sig
   type hyp =
     | Assum of {name : string; type_ : Constrextern.PrintingVariants.t}
     | Def of {name : string; type_ : Constrextern.PrintingVariants.t; value : Constrextern.PrintingVariants.t}
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   type t = {
     hyps : hyp list;
     concl : Constrextern.PrintingVariants.t;
-  } [@@deriving yojson]
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   val make : Evd.evar_map -> Evar.t -> t
 end
@@ -32,12 +32,12 @@ module Step : sig
     | StartSubproof
     | EndSubproof
     | Bullet of Proof_bullet.t
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   type t = {
     goals_before : Goal.t list;
     kind: kind;
-  } [@@deriving yojson]
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 end
 
 val steps : Step.t list ref
@@ -56,13 +56,13 @@ module Theorem : sig
     | Admitted
     | Proved
     | Exact
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   type t = {
     path : Libnames.full_path;
     steps : Step.t list;
     outcome : outcome
-  }  [@@deriving yojson]
+  }  [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 end
 
 val theorems : Theorem.t list ref

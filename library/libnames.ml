@@ -183,7 +183,7 @@ module Feature = struct
     | FeatureConstRef of {path: full_path}
     | FeatureIndRef of {path: full_path}
     | FeatureConstructRef of {ind_path: full_path; path: full_path}
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   let equal f1 f2 =
     f1 == f2

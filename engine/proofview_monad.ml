@@ -146,7 +146,7 @@ module Info = struct
     | EventDispatch of 'a event list
     | EventTactic of 'a * 'a event
     | EventMessage of string
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   let rec printed f = function
     | Seq brs -> EventSeq (brs |> List.map (printed f))

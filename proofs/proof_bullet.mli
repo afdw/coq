@@ -18,7 +18,7 @@ type t =
     | Dash of int
     | Star of int
     | Plus of int
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
 (** A [behavior] is the data of a put function which
     is called when a bullet prefixes a tactic, a suggest function

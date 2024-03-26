@@ -101,12 +101,12 @@ module Goal = struct
   type hyp =
     | Assum of {name : string; type_ : Constrextern.PrintingVariants.t}
     | Def of {name : string; type_ : Constrextern.PrintingVariants.t; value : Constrextern.PrintingVariants.t}
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   type t = {
     hyps : hyp list;
     concl : Constrextern.PrintingVariants.t;
-  } [@@deriving yojson]
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   let make sigma g =
     let EvarInfo evi = Evd.find sigma g in
@@ -141,12 +141,12 @@ module Step = struct
     | StartSubproof
     | EndSubproof
     | Bullet of Proof_bullet.t
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   type t = {
     goals_before : Goal.t list;
     kind : kind;
-  } [@@deriving yojson]
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 end
 
 let steps = ref []
@@ -2382,13 +2382,13 @@ module Theorem = struct
     | Admitted
     | Proved
     | Exact
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   type t = {
     path : Libnames.full_path;
     steps : Step.t list;
     outcome : outcome;
-  } [@@deriving yojson]
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 end
 
 let theorems = ref []

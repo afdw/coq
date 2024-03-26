@@ -14,7 +14,7 @@ type t =
     | Dash of int
     | Star of int
     | Plus of int
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
 let bullet_eq b1 b2 = match b1, b2 with
 | Dash n1, Dash n2 -> n1 = n2

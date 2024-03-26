@@ -60,7 +60,7 @@ module Info : sig
     | EventDispatch of 'a event list
     | EventTactic of 'a * 'a event
     | EventMessage of string
-    [@@deriving yojson]
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   val printed : ((unit -> Pp.t) -> 'a) -> trace -> 'a event
 end

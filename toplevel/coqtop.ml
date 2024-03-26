@@ -70,7 +70,7 @@ module Trace = struct
   type t = {
     sub_filenames : string list;
     theorems : Vernacentries.Theorem.t list;
-  } [@@deriving yojson]
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 end
 
 let start_coq custom =

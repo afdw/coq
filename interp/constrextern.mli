@@ -97,7 +97,7 @@ module PrintingVariants : sig
     no_notations : string;
     low_level : string;
     features : Libnames.Fset.t;
-  } [@@deriving yojson]
+  } [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
   val run : (bool ref * bool) list -> (unit -> 'a) -> 'a
 
