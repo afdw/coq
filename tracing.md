@@ -66,14 +66,6 @@ module Info : sig
       (** A message was produced. *)
 end
 
-(** A proof bullet, for example, [Star 3] is "***". *)
-module Proof_bullet : sig
-  type t =
-    | Dash of int
-    | Star of int
-    | Plus of int
-end
-
 (** A step in the proof. *)
 module Step : sig
   type kind =
@@ -84,7 +76,7 @@ module Step : sig
       }
     | StartSubproof (** { *)
     | EndSubproof (** } *)
-    | Bullet of Proof_bullet.t
+    | Bullet of string (** A proof bullet, for example "***". *)
 
   type t = {
     goals_before : Goal.t list; (** Goals before this step. *)
