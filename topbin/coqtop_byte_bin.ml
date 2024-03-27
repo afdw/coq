@@ -39,12 +39,10 @@ let ml_loop fmt ?init_file () =
       | None -> ()
       | Some f ->
         init_file := None; (* Run the initialization file only once *)
-        ignore (Toploop.use_silently fmt (Toploop.File f))
+        ignore (Coq_config_bin.toploop_use_silently fmt f)
     end
   );
-  try
-    Toploop.loop fmt
-  with Compenv.Exit_with_status(0) -> ()
+  Coq_config_bin.compenv_handle_exit_with_status_0 (fun () -> Toploop.loop fmt)
 
 let drop_setup () =
   let ppf = Format.std_formatter in
