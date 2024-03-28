@@ -232,11 +232,11 @@ let static_vernac_extend ~plugin ~command ?classifier ?entry ext =
     let r = untype_grammar ty in
     let ext = Vernacexpr.{ ext_plugin; ext_entry = command; ext_index = i } in
     let () = vinterp_add depr ext f in
-    let () = Egramml.declare_vernac_command_grammar ~allow_override:false ext entry r in
+    let () = Egramml.declare_vernac_command_grammar ~allow_override:!Flags.in_ml_toplevel ext entry r in
     let () = match plugin with
       | None ->
         let () =
-          if !is_static_linking_done
+          if !is_static_linking_done && not !Flags.in_ml_toplevel
           then CErrors.anomaly
               Pp.(str "static_vernac_extend in dynlinked code must pass non-None plugin.")
         in

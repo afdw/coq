@@ -61,7 +61,7 @@ let ppsp sp = pp(pr_path sp)
 let ppqualid qid = pp(pr_qualid qid)
 let ppscheme k = pp (Ind_tables.pr_scheme_kind k)
 
-let pprecarg = Declareops.pr_recarg
+let pprecarg r = pp (Declareops.pr_recarg r)
 let ppwf_paths x = pp (Declareops.pr_wf_paths x)
 
 let get_current_context () =

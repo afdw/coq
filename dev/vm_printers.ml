@@ -26,9 +26,8 @@ let ppsort = function
   | SProp -> print_string "SProp"
   | Set -> print_string "Set"
   | Prop -> print_string "Prop"
-  | Type u -> print_string "Type"
-
-
+  | Type _ -> print_string "Type"
+  | QSort _ -> print_string "QSort"
 
 let print_idkey idk =
   match idk with
