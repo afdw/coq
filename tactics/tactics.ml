@@ -1016,7 +1016,7 @@ let reduce redexp cl =
   | ExtraRedExpr _ -> StableHypConv (* Should we be that lenient ?*)
   in
   let redexp = Redexpr.eval_red_expr env redexp in
-  Proofview.Trace.name_tactic (fun () -> trace env sigma) begin
+  Proofview.Trace.tag_tactic (fun () -> trace env sigma) begin
   begin match cl.concl_occs with
   | NoOccurrences -> Proofview.tclUNIT ()
   | occs ->

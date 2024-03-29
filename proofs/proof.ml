@@ -454,12 +454,10 @@ let solve ?with_end_tac gi info_lvl tac pr =
     let env = Global.env () in
     let env = Environ.update_typing_flags ?typing_flags:pr.typing_flags env in
     let (p,(status,info),()) = run_tactic env tac pr in
-    let env = Global.env () in
-    let sigma = Evd.from_env env in
     let () =
       match info_lvl with
       | None -> ()
-      | Some i -> Feedback.msg_info (Pp.hov 0 (Proofview.Trace.pr_info env sigma ~lvl:i info))
+      | Some i -> Feedback.msg_info (Pp.hov 0 (Proofview.Trace.pr_info ~lvl:i info))
     in
     (p,status)
 

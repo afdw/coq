@@ -163,7 +163,7 @@ val apply
   -> proofview
   -> 'a * proofview
        * bool
-       * Proofview_monad.Info.tree
+       * Proofview_monad.Info.trace
 
 (** {7 Monadic primitives} *)
 
@@ -273,6 +273,23 @@ val tclFOCUSID : ?nosuchgoal:'a tactic -> Names.Id.t -> 'a tactic -> 'a tactic
     specified range doesn't correspond to existing goals, behaves like
     [tclUNIT ()] instead of failing. *)
 val tclTRYFOCUS : int -> int -> unit tactic -> unit tactic
+
+
+(** {7 Trace} *)
+
+module Trace : sig
+  (** [record_info_trace t] behaves like [t] except the [info] trace
+      is stored. *)
+  val record_info_trace : 'a tactic -> 'a tactic
+
+  type tactic_wrapper = {wrap : 'a. 'a tactic -> 'a tactic}
+
+  val tag_dispatch : (tag_branch:tactic_wrapper -> 'a tactic) -> 'a tactic
+  val message : Proofview_monad.Info.lazy_msg -> unit tactic
+  val tag_tactic : Proofview_monad.Info.lazy_msg -> 'a tactic -> 'a tactic
+
+  val pr_info : ?lvl:int -> Proofview_monad.Info.trace -> Pp.t
+end
 
 
 (** {7 Dispatching on goals} *)
@@ -549,22 +566,6 @@ module Goal : sig
 
   (** Compatibility: avoid if possible *)
   val goal : t -> Evar.t
-
-end
-
-
-(** {6 Trace} *)
-
-module Trace : sig
-
-  (** [record_info_trace t] behaves like [t] except the [info] trace
-      is stored. *)
-  val record_info_trace : 'a tactic -> 'a tactic
-
-  val log : Proofview_monad.lazy_msg -> unit tactic
-  val name_tactic : Proofview_monad.lazy_msg -> 'a tactic -> 'a tactic
-
-  val pr_info : Environ.env -> Evd.evar_map -> ?lvl:int -> Proofview_monad.Info.tree -> Pp.t
 
 end
 

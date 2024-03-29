@@ -1015,7 +1015,7 @@ module Search = struct
     in
     let () =
       ppdebug 1 (fun () ->
-          str"The tactic trace is: " ++ hov 0 (Proofview.Trace.pr_info env evm ~lvl:1 info))
+          str"The tactic trace is: " ++ hov 0 (Proofview.Trace.pr_info ~lvl:1 info))
     in
     let finished = Proofview.finished pv' in
     let evm' = Proofview.return pv' in
