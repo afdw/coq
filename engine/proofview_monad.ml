@@ -11,15 +11,14 @@
 (** This file defines the datatypes used as internal states by the
     tactic monad, and specialises the [Logic_monad] to these type. *)
 
-(** {6 Trees/forest for traces} *)
+(** {6 Forest builder for traces} *)
 
-module Trace = struct
-
+module TraceBuilder = struct
   (** The intent is that an ['a forest] is a list of messages of type
       ['a]. But messages can stand for a list of more precise
       messages, hence the structure is organised as a tree. *)
-  type 'a forest = 'a tree list
-  and  'a tree   = Seq of 'a * 'a forest
+  type 'a tree = Node of 'a * 'a forest
+  and 'a forest = 'a tree list
 
   (** To build a trace incrementally, we use an intermediary data
       structure on which we can define an S-expression like language
@@ -31,121 +30,113 @@ module Trace = struct
       Concretely, we want to add a new tree to a forest: and we are
       building it by adding new trees to the left of its left-most
       subtrees which is built the same way. *)
-  type 'a incr = { head:'a forest ; opened: 'a tree list }
+  type 'a incr = {head : 'a forest; opened : 'a tree list}
 
   (** S-expression like language as ['a incr] transformers. It is the
       responsibility of the library builder not to use [close] when no
       tag is open. *)
-  let empty_incr = { head=[] ; opened=[] }
-  let opn a { head ; opened } = { head ; opened = Seq(a,[])::opened }
-  let close { head ; opened } =
+
+  let init = {head = []; opened = []}
+
+  let open_ a {head; opened} = {head; opened = Node (a, []) :: opened}
+  let close {head; opened} =
     match opened with
-    | [a] -> { head = a::head ; opened=[] }
-    | a::Seq(b,f)::opened -> { head ; opened=Seq(b,a::f)::opened }
+    | [a] -> {head = a :: head; opened = []}
+    | a :: Node(b, f) :: opened -> {head; opened = Node (b, a :: f) :: opened}
     | [] -> assert false
-  let leaf a s = close (opn a s)
+  let leaf a s = close (open_ a s)
 
   (** Returning a forest. It is the responsibility of the library
       builder to close all the tags. *)
   (* spiwack: I may want to close the tags instead, to deal with
-     interruptions. *)
-  let rec mirror f = List.rev_map mirror_tree f
-  and mirror_tree (Seq(a,f)) = Seq(a,mirror f)
+    interruptions. *)
+  let rec mirror_tree (Node (a, f)) = Node (a, mirror_forest f)
+  and mirror_forest f = f |> List.rev_map mirror_tree
 
-  let to_tree = function
-    | { head ; opened=[] } -> mirror head
-    | { head ; opened=_::_} -> assert false
-
+  let finalize = function
+    | {head; opened = []} -> mirror_forest head
+    | {head; opened = _ :: _} -> assert false
 end
-
-
 
 (** {6 State types} *)
 
-(** We typically label nodes of [Trace.tree] with messages to
-    print. But we don't want to compute the result. *)
-type lazy_msg = unit -> Pp.t
-
 (** Info trace. *)
 module Info = struct
+  open TraceBuilder
 
-  (** The type of the tags for [info]. *)
+  (** We typically label nodes of the trace with messages to
+      print. But we don't want to compute the result. *)
+  type lazy_msg = unit -> Pp.t
+
+  (** The type of the tags for [Info]. *)
   type tag =
-    | Msg of lazy_msg (** A simple message *)
-    | Tactic of lazy_msg (** A tactic call *)
-    | Dispatch  (** A call to [tclDISPATCH]/[tclEXTEND] *)
-    | DBranch  (** A special marker to delimit individual branch of a dispatch. *)
+    | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND] or [Proofview.Goal.enter] *)
+    | TagDispatchBranch  (** A special marker to delimit individual branch of a dispatch. *)
+    | TagTactic of lazy_msg (** A tactic call *)
+    | TagMessage of lazy_msg (** A simple message *)
 
-  type state = tag Trace.incr
-  type tree = tag Trace.forest
+  type state = tag incr
+  type pretrace = tag forest
 
-  let pr_in_comments m = Pp.(str"(* "++ m () ++str" *)")
+  type trace =
+    | Sequence of trace list (** A sequence *)
+    | Dispatch of trace list (** A call to [tclDISPATCHGEN], [tclEXTEND] or [Proofview.Goal.enter] *)
+    | Tactic of lazy_msg * trace (** A tactic call *)
+    | Message of lazy_msg (** A simple message *)
 
-  let unbranch = function
-    | Trace.Seq (DBranch,brs) -> brs
-    | _ -> assert false
+  let rec finish_tree = function
+    | Node (TagDispatch, brs) ->
+      Dispatch (
+        brs |> List.map (function
+          | Node (TagDispatchBranch, f) -> finish f
+          | _ -> assert false
+        )
+      )
+    | Node (TagDispatchBranch, _) -> assert false
+    | Node (TagTactic m, f) -> Tactic (m, finish f)
+    | Node (TagMessage m, []) -> Message m
+    | Node (TagMessage _, _) -> assert false
+  and finish f = Sequence (f |> List.map finish_tree)
 
+  let rec compress = function
+    | Sequence [c] -> compress c
+    | Sequence brs ->
+      Sequence (
+        brs
+          |> List.map compress
+          |> List.map (function
+              | Sequence brs -> brs
+              | b -> [b]
+            )
+          |> List.flatten
+      )
+    | Dispatch [c] -> compress c
+    | Dispatch brs ->
+      let brs = brs |> List.map compress in
+      let all_empty = brs |> List.for_all (fun e -> match e with Sequence [] -> true | _ -> false) in
+      if all_empty then Sequence [] else Dispatch brs
+    | Tactic (m, c) -> Tactic (m, compress c)
+    | Message m -> Message m
 
-  let is_empty_branch = let open Trace in function
-    | Seq(DBranch,[]) -> true
-    | _ -> false
+  let rec print = let open Pp in function
+    | Sequence brs ->
+      let sep () = str ";" ++ spc () in
+      if brs = []
+      then str "idtac"
+      else brs |> Pp.prlist_with_sep sep print
+    | Dispatch brs ->
+      let sep () = spc () ++ str "|" ++ spc () in
+      if brs = []
+      then str "idtac"
+      else str "[>" ++ spc () ++ (brs |> Pp.prlist_with_sep sep print) ++ spc () ++ str "]"
+    | Tactic (m, _) -> m ()
+    | Message m -> str "(* " ++ m () ++ str " *)"
 
-  (** Dispatch with empty branches are (supposed to be) equivalent to
-      [idtac] which need not appear, so they are removed from the
-      trace. *)
-  let dispatch brs =
-    let open Trace in
-    if CList.for_all is_empty_branch brs then None
-    else Some (Seq(Dispatch,brs))
-
-  let constr = let open Trace in function
-    | Dispatch -> dispatch
-    | t -> fun br -> Some (Seq(t,br))
-
-  let rec compress_tree = let open Trace in function
-    | Seq(t,f) -> constr t (compress f)
-  and compress f =
-    CList.map_filter compress_tree f
-
-  (** [with_sep] is [true] when [Tactic m] must be printed with a
-      trailing semi-colon. *)
-  let rec pr_tree with_sep = let open Trace in function
-    | Seq (Msg m,[]) -> pr_in_comments m
-    | Seq (Tactic m,_) ->
-        let tail = if with_sep then Pp.str";" else Pp.mt () in
-        Pp.(m () ++ tail)
-    | Seq (Dispatch,brs) ->
-        let tail = if with_sep then Pp.str";" else Pp.mt () in
-        Pp.(pr_dispatch brs++tail)
-    | Seq (Msg _,_::_) | Seq (DBranch,_) -> assert false
-  and pr_dispatch brs =
-    let open Pp in
-    let brs = List.map unbranch brs in
-    match brs with
-    | [br] -> pr_forest br
-    | _ ->
-        let sep () = spc()++str"|"++spc() in
-        let branches = prlist_with_sep sep pr_forest brs in
-        str"[>"++spc()++branches++spc()++str"]"
-  and pr_forest = function
-    | [] -> Pp.mt ()
-    | [tr] -> pr_tree false tr
-    | tr::l -> Pp.(pr_tree true tr ++ pr_forest l)
-
-  let print _env _sigma f =
-    pr_forest (compress f)
-
-  let rec collapse_tree n t =
-    let open Trace in
-    match n , t with
-    | 0 , t -> [t]
-    | _ , (Seq(Tactic _,[]) as t) -> [t]
-    | n , Seq(Tactic _,f) -> collapse (pred n) f
-    | n , Seq(Dispatch,brs) -> [Seq(Dispatch, (collapse n brs))]
-    | n , Seq(DBranch,br) -> [Seq(DBranch, (collapse n br))]
-    | _ , (Seq(Msg _,_) as t) -> [t]
-  and collapse n f =
-    CList.map_append (collapse_tree n) f
+  let rec collapse n = function
+    | Sequence brs -> Sequence (brs |> List.map (collapse n))
+    | Dispatch brs -> Dispatch (brs |> List.map (collapse n))
+    | Tactic (m, c) -> if n > 0 then collapse (n - 1) c else Tactic (m, Sequence [])
+    | Message m -> Message m
 end
 
 module StateStore = Store.Make()
@@ -186,7 +177,7 @@ module P = struct
 
   type u = Info.state
 
-  let uunit = Trace.empty_incr
+  let uunit = TraceBuilder.init
 
 end
 
@@ -245,30 +236,38 @@ end
 (** Lens and utilities pertaining to the info trace *)
 module InfoL = struct
   let recording = Logical.(map (fun {P.trace} -> trace) current)
-  let if_recording t =
-    let open Logical in
-    recording >>= fun r ->
-    if r then t else return ()
 
   let record_trace t =
     Logical.(
       current >>= fun s ->
-      local {s with P.trace = true} t)
+      local {s with P.trace = true} t
+    )
 
   let raw_update = Logical.update
-  let update f = if_recording (raw_update f)
-  let opn a = update (Trace.opn a)
-  let close = update Trace.close
-  let leaf a = update (Trace.leaf a)
+  let update f =
+    let open Logical in
+    recording >>= fun r ->
+    if r then
+      raw_update f
+    else
+      return ()
+
+  let leaf a =
+    let open Logical in
+    recording >>= fun r ->
+    if r then
+      raw_update (TraceBuilder.leaf a)
+    else
+      return ()
 
   let tag a t =
     let open Logical in
     recording >>= fun r ->
-    if r then begin
-      raw_update (Trace.opn a) >>
+    if r then (
+      raw_update (TraceBuilder.open_ a) >>
       t >>= fun a ->
-      raw_update Trace.close >>
+      raw_update TraceBuilder.close >>
       return a
-    end else
+    ) else
       t
 end

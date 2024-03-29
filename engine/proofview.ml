@@ -239,8 +239,9 @@ let apply ~name ~poly env t sp =
   let ans = Logic_monad.NonLogical.run ans in
   match ans with
   | Nil (e, info) -> Exninfo.iraise (TacticFailure e, info)
-  | Cons ((r, (state, _), status, info), _) ->
-    r, state, status, Trace.to_tree info
+  | Cons ((r, (state, _), status, pretrace), _) ->
+    let trace = Info.compress (Info.finish (TraceBuilder.finalize pretrace)) in
+    r, state, status, trace
 
 
 
@@ -433,6 +434,22 @@ let tclFOCUSID ?(nosuchgoal=tclZERO (NoSuchGoals 1)) id t =
       return result
   with Not_found -> nosuchgoal
 
+
+(** {6 Trace} *)
+
+module Trace = struct
+  let record_info_trace = InfoL.record_trace
+
+  let tag_dispatch f = InfoL.tag Info.TagDispatch (f (InfoL.tag Info.TagDispatchBranch))
+  let message m = InfoL.leaf (Info.TagMessage m)
+  let tag_tactic m t = InfoL.tag (Info.TagTactic m) t
+
+  let pr_info ?(lvl=0) info =
+    assert (lvl >= 0);
+    Info.(print (collapse lvl info))
+end
+
+
 (** {7 Dispatching on goals} *)
 
 exception SizeMismatch of int*int
@@ -554,9 +571,7 @@ let tclDISPATCHGEN0 join tacs =
       Proof.map join ans
 
 let tclDISPATCHGEN join tacs =
-  let branch t = InfoL.tag (Info.DBranch) t in
-  let tacs = CList.map branch tacs in
-  InfoL.tag (Info.Dispatch) (tclDISPATCHGEN0 join tacs)
+  Trace.tag_dispatch (fun tag_branch -> tclDISPATCHGEN0 join (CList.map tag_branch tacs))
 
 let tclDISPATCH tacs = tclDISPATCHGEN ignore tacs
 
@@ -612,9 +627,7 @@ let tclINDEPENDENT tac =
   match initial.comb with
   | [] -> tclUNIT ()
   | [_] -> tac
-  | _ ->
-      let tac = InfoL.tag (Info.DBranch) tac in
-      InfoL.tag (Info.Dispatch) (iter_goal (fun _ -> tac))
+  | _ -> Trace.tag_dispatch (fun tag_branch -> iter_goal (fun _ -> tag_branch tac))
 
 let tclINDEPENDENTL tac =
   let open Proof in
@@ -622,28 +635,29 @@ let tclINDEPENDENTL tac =
   match initial.comb with
   | [] -> tclUNIT []
   | [_] -> tac >>= fun x -> return [x]
-  | _ ->
-      let tac = InfoL.tag (Info.DBranch) tac in
-      InfoL.tag (Info.Dispatch) (map_goal (fun _ -> tac))
+  | _ -> Trace.tag_dispatch (fun tag_branch -> map_goal (fun _ -> tag_branch tac))
+
 
 (** {7 Goal manipulation} *)
 
 (** Shelves all the goals under focus. *)
 let shelve =
   let open Proof in
-  Comb.get >>= fun initial ->
-  Comb.set [] >>
-  InfoL.leaf (Info.Tactic (fun () -> Pp.str"shelve")) >>
-  let initial = CList.map drop_state initial in
-  Pv.modify (fun pv -> { pv with solution = Evd.shelve pv.solution initial })
+  Trace.tag_tactic (fun () -> Pp.str "shelve") (
+    Comb.get >>= fun initial ->
+    Comb.set [] >>
+    let initial = CList.map drop_state initial in
+    Pv.modify (fun pv -> {pv with solution = Evd.shelve pv.solution initial})
+  )
 
 let shelve_goals l =
   let open Proof in
-  Comb.get >>= fun initial ->
-  let comb = CList.filter (fun g -> not (CList.mem (drop_state g) l)) initial in
-  Comb.set comb >>
-  InfoL.leaf (Info.Tactic (fun () -> Pp.str"shelve_goals")) >>
-  Pv.modify (fun pv -> { pv with solution = Evd.shelve pv.solution l })
+  Trace.tag_tactic (fun () -> Pp.str "shelve_goals") (
+    Comb.get >>= fun initial ->
+    let comb = CList.filter (fun g -> not (CList.mem (drop_state g) l)) initial in
+    Comb.set comb >>
+    Pv.modify (fun pv -> {pv with solution = Evd.shelve pv.solution l})
+  )
 
 (** [depends_on sigma src tgt] checks whether the goal [src] appears
     as an existential variable in the definition of the goal [tgt] in
@@ -705,13 +719,14 @@ let partition_unifiable sigma l =
     considered). *)
 let shelve_unifiable_informative =
   let open Proof in
-  Pv.get >>= fun initial ->
-  let (u,n) = partition_unifiable initial.solution initial.comb in
-  Comb.set n >>
-  InfoL.leaf (Info.Tactic (fun () -> Pp.str"shelve_unifiable")) >>
-  let u = CList.map drop_state u in
-  Pv.modify (fun pv -> { pv with solution = Evd.shelve pv.solution u }) >>
-  tclUNIT u
+  Trace.tag_tactic (fun () -> Pp.str "shelve_unifiable") (
+    Pv.get >>= fun initial ->
+    let (u, n) = partition_unifiable initial.solution initial.comb in
+    Comb.set n >>
+    let u = CList.map drop_state u in
+    Pv.modify (fun pv -> {pv with solution = Evd.shelve pv.solution u}) >>
+    tclUNIT u
+  )
 
 let shelve_unifiable =
   let open Proof in
@@ -796,34 +811,34 @@ let goodmod p m =
     if p' < 0 then p'+m else p'
 
 let cycle n =
-  let open Proof in
-  InfoL.leaf (Info.Tactic (fun () -> Pp.(str"cycle "++int n))) >>
-  Comb.modify begin fun initial ->
-    let l = CList.length initial in
-    let n' = goodmod n l in
-    let (front,rear) = CList.chop n' initial in
-    rear@front
-  end
+  Trace.tag_tactic (fun () -> Pp.(str "cycle" ++ spc () ++ int n)) (
+    Comb.modify (fun initial ->
+      let l = CList.length initial in
+      let n' = goodmod n l in
+      let (front, rear) = CList.chop n' initial in
+      rear @ front
+    )
+  )
 
 let swap i j =
-  let open Proof in
-  InfoL.leaf (Info.Tactic (fun () -> Pp.(hov 2 (str"swap"++spc()++int i++spc()++int j)))) >>
-  Comb.modify begin fun initial ->
-    let l = CList.length initial in
-    let i = if i>0 then i-1 else i and j = if j>0 then j-1 else j in
-    let i = goodmod i l and j = goodmod j l in
-    CList.map_i begin fun k x ->
-      match k with
-      | k when Int.equal k i -> CList.nth initial j
-      | k when Int.equal k j -> CList.nth initial i
-      | _ -> x
-    end 0 initial
-  end
+  Trace.tag_tactic (fun () -> Pp.(str "swap" ++ spc () ++ int i ++ spc () ++ int j)) (
+    Comb.modify (fun initial ->
+      let l = CList.length initial in
+      let i = if i > 0 then i - 1 else i
+      and j = if j > 0 then j - 1 else j in
+      let i = goodmod i l
+      and j = goodmod j l in
+      CList.map_i (fun k x ->
+        match k with
+        | k when k = i -> CList.nth initial j
+        | k when k = j -> CList.nth initial i
+        | _ -> x
+      ) 0 initial
+    )
+  )
 
 let revgoals =
-  let open Proof in
-  InfoL.leaf (Info.Tactic (fun () -> Pp.str"revgoals")) >>
-  Comb.modify CList.rev
+  Trace.tag_tactic (fun () -> Pp.str "revgoals") (Comb.modify CList.rev)
 
 let numgoals =
   let open Proof in
@@ -863,11 +878,12 @@ let give_up evs pv =
 
 let give_up =
   let open Proof in
-  Comb.get >>= fun initial ->
-  Comb.set [] >>
-  mark_as_unsafe >>
-  InfoL.leaf (Info.Tactic (fun () -> Pp.str"give_up")) >>
-  Pv.modify (give_up initial)
+  Trace.tag_tactic (fun () -> Pp.str "give_up") (
+    Comb.get >>= fun initial ->
+    Comb.set [] >>
+    mark_as_unsafe >>
+    Pv.modify (give_up initial)
+  )
 
 
 (** {7 Control primitives} *)
@@ -1131,17 +1147,17 @@ module Goal = struct
     gmake_with info env sigma goal state
 
   let enter f =
-    let f gl = InfoL.tag (Info.DBranch) (f gl) in
-    InfoL.tag (Info.Dispatch) begin
-    iter_goal begin fun goal ->
-      Env.get >>= fun env ->
-      tclEVARMAP >>= fun sigma ->
-      try f (gmake env sigma goal)
-      with e when catchable_exception e ->
-        let (e, info) = Exninfo.capture e in
-        tclZERO ~info e
-    end
-    end
+    Trace.tag_dispatch (fun tag_branch ->
+      iter_goal (fun goal ->
+        Env.get >>= fun env ->
+        tclEVARMAP >>= fun sigma ->
+        let gl = gmake env sigma goal in
+        try tag_branch (f gl)
+        with e when catchable_exception e ->
+          let (e, info) = Exninfo.capture e in
+          tclZERO ~info e
+      )
+    )
 
   let enter_one ?(__LOC__=__LOC__) f =
     let open Proof in
@@ -1192,24 +1208,6 @@ module Goal = struct
   let goal { self=self } = self
 
 end
-
-
-
-(** {6 Trace} *)
-
-module Trace = struct
-
-  let record_info_trace = InfoL.record_trace
-
-  let log m = InfoL.leaf (Info.Msg m)
-  let name_tactic m t = InfoL.tag (Info.Tactic m) t
-
-  let pr_info env sigma ?(lvl=0) info =
-    assert (lvl >= 0);
-    Info.(print env sigma (collapse lvl info))
-
-end
-
 
 
 (** {6 Non-logical state} *)
