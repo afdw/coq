@@ -12,25 +12,25 @@
     tactic monad, and specialises the [Logic_monad] to these types. It should
     not be used directly. Consider using {!Proofview} instead. *)
 
-(** {6 Traces} *)
+(** {6 Forest builder for traces} *)
 
-module Trace : sig
-
+module TraceBuilder : sig
   (** The intent is that an ['a forest] is a list of messages of type
       ['a]. But messages can stand for a list of more precise
       messages, hence the structure is organised as a tree. *)
-  type 'a forest = 'a tree list
-  and  'a tree   = Seq of 'a * 'a forest
+  type 'a tree = Node of 'a * 'a forest
+  and 'a forest = 'a tree list
 
   (** To build a trace incrementally, we use an intermediary data
       structure on which we can define an S-expression like language
       (like a simplified xml except the closing tags do not carry a
       name). *)
   type 'a incr
-  val to_tree : 'a incr -> 'a forest
 
-  (** [open a] opens a tag with name [a]. *)
-  val opn : 'a -> 'a incr -> 'a incr
+  val init : 'a incr
+
+  (** [open_ a] opens a tag with name [a]. *)
+  val open_ : 'a -> 'a incr -> 'a incr
 
   (** [close] closes the last open tag. It is the responsibility of
       the user to close all the tags. *)
@@ -39,34 +39,45 @@ module Trace : sig
   (** [leaf] creates an empty tag with name [a]. *)
   val leaf : 'a -> 'a incr -> 'a incr
 
+  val finalize : 'a incr -> 'a forest
 end
 
 (** {6 State types} *)
 
-(** We typically label nodes of [Trace.tree] with messages to
-    print. But we don't want to compute the result. *)
-type lazy_msg = unit -> Pp.t
-
 (** Info trace. *)
 module Info : sig
+  open TraceBuilder
 
-  (** The type of the tags for [info]. *)
+  (** We typically label nodes of the trace with messages to
+      print. But we don't want to compute the result. *)
+  type lazy_msg = unit -> Pp.t
+
+  (** The type of the tags for [Info]. *)
   type tag =
-    | Msg of lazy_msg (** A simple message *)
-    | Tactic of lazy_msg (** A tactic call *)
-    | Dispatch  (** A call to [tclDISPATCH]/[tclEXTEND] *)
-    | DBranch  (** A special marker to delimit individual branch of a dispatch. *)
+    | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
+    | TagDispatchBranch (** A marker to delimit an individual branch of [TagDispatch]. *)
+    | TagTactic of lazy_msg (** A tactic call. *)
+    | TagMessage of lazy_msg (** A message by [TacId]. *)
 
-  type state = tag Trace.incr
-  type tree = tag Trace.forest
+  type state = tag incr
+  type pretrace = tag forest
 
-  val print : Environ.env -> Evd.evar_map -> tree -> Pp.t
+  type trace =
+    | Sequence of trace list (** A sequence. *)
+    | Dispatch of trace list (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
+    | Tactic of lazy_msg * trace (** A tactic call, with its execution detailed. *)
+    | Message of lazy_msg (** A message by [TacId]. *)
+
+  val finish : pretrace -> trace
+
+  val compress : trace -> trace
+
+  val print : trace -> Pp.t
 
   (** [collapse n t] flattens the first [n] levels of [Tactic] in an
       info trace, effectively forgetting about the [n] top level of
       names (if there are fewer, the last name is kept). *)
-  val collapse : int -> tree -> tree
-
+  val collapse : int -> trace -> trace
 end
 
 module StateStore : Store.S
@@ -146,10 +157,9 @@ module InfoL : sig
   val record_trace : 'a Logical.t -> 'a Logical.t
 
   val update : (Info.state -> Info.state) -> unit Logical.t
-  val opn : Info.tag -> unit Logical.t
-  val close : unit Logical.t
+
   val leaf : Info.tag -> unit Logical.t
 
-  (** [tag a t] opens tag [a] runs [t] then closes the tag. *)
+  (** [tag a t] opens tag [a], runs [t] then closes the tag. *)
   val tag : Info.tag -> 'a Logical.t -> 'a Logical.t
 end
