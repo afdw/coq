@@ -65,11 +65,39 @@ let raw_anomaly e = match e with
   | _ ->
     str "Uncaught exception " ++ str (Printexc.to_string e) ++ str "."
 
-let print_backtrace e = match Exninfo.get_backtrace e with
-| None -> mt ()
-| Some bt ->
-  let bt = str (Exninfo.backtrace_to_string bt) in
-  fnl () ++ hov 0 bt
+let print_backtrace e =
+  let pp_backtrace =
+    match Exninfo.get_backtrace e with
+    | None -> mt ()
+    | Some bt ->
+      let bt_string = Exninfo.backtrace_to_string bt in
+      fnl () ++ hov 0 (str bt_string) in
+  let pp_additional_backtrace =
+    match Exninfo.get_additional_backtraces e with
+    | None -> mt ()
+    | Some bts ->
+      let bts =
+        bts
+          |> List.sort (fun (c1, _, _) (c2, _, _) -> compare c1 c2)
+          |> List.rev in
+      let print_s_bt (_, s, bt) =
+        let bt_string = Exninfo.backtrace_to_string bt in
+        let bt_string =
+          (("At " ^ s ^ ":") :: (
+            bt_string
+              |> String.split_on_char '\n'
+              |> List.to_seq
+              |> Seq.drop_while (fun e -> e |> String.starts_with ~prefix:"Raised by primitive operation at Exninfo.save_additional_backtrace")
+              |> Seq.take_while (fun e -> not (e |> String.starts_with ~prefix:"Called from Exninfo.save_additional_backtrace.(fun)"))
+              |> List.of_seq
+          ))
+            |> List.map (fun e -> "  " ^ e)
+            |> String.concat "\n" in
+        hov 0 (str bt_string) in
+      fnl () ++ str "Additional backtraces (" ++ int (List.length bts) ++ str "):" ++
+        fnl () ++ fnl () ++ prlist_with_sep (fun () -> fnl () ++ fnl ()) print_s_bt bts ++
+        fnl () ++ fnl () ++ str "End of additional backtraces." ++ fnl () in
+  pp_backtrace ++ pp_additional_backtrace
 
 let print_anomaly askreport e =
   if askreport then
