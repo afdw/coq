@@ -190,27 +190,67 @@ struct
     { iolist = fun s nil cons -> cons x s nil }
 
   let (>>=) m f =
-    { iolist = fun s nil cons ->
-      m.iolist s nil (fun x s next -> (f x).iolist s next cons) }
+    Exninfo.save_additional_backtrace "BackState.(>>=)" (fun wrapper ->
+      let body (s, nil, k) = m.iolist s nil k in
+      let body (c, s, nil, k) = wrapper.wrap c c body (s, nil, k) in
+      let body' (cons, x, s, next) = (f x).iolist s next cons in
+      let body' (c, c', cons, x, s, next) = wrapper.wrap c' c (wrapper.unwrap c body') (cons, x, s, next) in
+      { iolist = fun s nil cons -> let c = wrapper.generate () in body (c, s, nil, fun x s next -> let c' = wrapper.generate () in body' (c, c', cons, x, s, next)) }
+    )
+    (* { iolist = fun s nil cons -> m.iolist s nil (fun x s next -> (f x).iolist s next cons) } *)
 
   let (>>) m f =
-    { iolist = fun s nil cons ->
-      m.iolist s nil (fun () s next -> f.iolist s next cons) }
+    Exninfo.save_additional_backtrace "BackState.(>>)" (fun wrapper ->
+      let body (s, nil, k) = m.iolist s nil k in
+      let body (c, s, nil, k) = wrapper.wrap c c body (s, nil, k) in
+      let body' (cons, s, next) = f.iolist s next cons in
+      let body' (c, c', cons, s, next) = wrapper.wrap c' c (wrapper.unwrap c body') (cons, s, next) in
+      { iolist = fun s nil cons -> let c = wrapper.generate () in body (c, s, nil, fun () s next -> let c' = wrapper.generate () in body' (c, c', cons, s, next)) }
+    )
+    (* { iolist = fun s nil cons -> m.iolist s nil (fun () s next -> f.iolist s next cons) } *)
 
   let map f m =
-    { iolist = fun s nil cons -> m.iolist s nil (fun x s next -> cons (f x) s next) }
+    Exninfo.save_additional_backtrace "BackState.map" (fun wrapper ->
+      let body (s, nil, k) = m.iolist s nil k in
+      let body (c, s, nil, k) = wrapper.wrap c c body (s, nil, k) in
+      let body' (cons, x, s, next) = cons (f x) s next in
+      let body' (c, c', cons, x, s, next) = wrapper.wrap c' c (wrapper.unwrap c body') (cons, x, s, next) in
+      { iolist = fun s nil cons -> let c = wrapper.generate () in body (c, s, nil, (fun x s next -> let c' = wrapper.generate () in body' (c, c', cons, x, s, next))) }
+    )
+    (* { iolist = fun s nil cons -> m.iolist s nil (fun x s next -> cons (f x) s next) } *)
 
   let zero e =
     { iolist = fun _ nil cons -> nil e }
 
   let plus m1 m2 =
-    { iolist = fun s nil cons -> m1.iolist s (fun e -> (m2 e).iolist s nil cons) cons }
+    Exninfo.save_additional_backtrace "BackState.plus" (fun wrapper ->
+      let body (s, cons, k) = m1.iolist s k cons in
+      let body (c, s, cons, k) = wrapper.wrap c c body (s, cons, k) in
+      let body' (nil, cons, e, s) = (m2 e).iolist s nil cons in
+      let body' (c, c', nil, cons, e, s) = wrapper.wrap c' c (wrapper.unwrap c body') (nil, cons, e, s) in
+      { iolist = fun s nil cons -> let c = wrapper.generate () in body (c, s, cons, (fun e -> let c' = wrapper.generate () in body' (c, c', nil, cons, e, s))) }
+    )
+    (* { iolist = fun s nil cons -> m1.iolist s (fun e -> (m2 e).iolist s nil cons) cons } *)
 
   let ignore m =
-    { iolist = fun s nil cons -> m.iolist s nil (fun _ s next -> cons () s next) }
+    Exninfo.save_additional_backtrace "BackState.plus" (fun wrapper ->
+      let body (s, nil, k) = m.iolist s nil k in
+      let body (c, s, nil, k) = wrapper.wrap c c body (s, nil, k) in
+      let body' (nil, cons, s, next) = cons () s next in
+      let body' (c, c', nil, cons, s, next) = wrapper.wrap c' c (wrapper.unwrap c body') (nil, cons, s, next) in
+      { iolist = fun s nil cons -> let c = wrapper.generate () in body (c, s, nil, (fun _ s next -> let c' = wrapper.generate () in body' (c, c', nil, cons, s, next))) }
+    )
+    (* { iolist = fun s nil cons -> m.iolist s nil (fun _ s next -> cons () s next) } *)
 
   let lift m =
-    { iolist = fun s nil cons -> NonLogical.(m >>= fun x -> cons x s nil) }
+    Exninfo.save_additional_backtrace "BackState.list" (fun wrapper ->
+      let body k = NonLogical.(m >>= k) in
+      let body (c, k) = wrapper.wrap c c body k in
+      let body' (cons, x, s, nil) = cons x s nil in
+      let body' (c, c', cons, x, s, nil) = wrapper.wrap c' c (wrapper.unwrap c body') (cons, x, s, nil) in
+      { iolist = fun s nil cons -> let c = wrapper.generate () in body (c, (fun x -> let c' = wrapper.generate () in body' (c, c', cons, x, s, nil))) }
+    )
+    (* { iolist = fun s nil cons -> NonLogical.(m >>= fun x -> cons x s nil) } *)
 
   (** State related *)
 
@@ -247,13 +287,27 @@ struct
   and ('a, 'e) reified_ = {r : 'e -> ('a, 'e) reified} [@@unboxed]
 
   let rec reflect (m : ('a * 'o, 'e) reified) =
-    { iolist = fun s0 nil cons ->
+    Exninfo.save_additional_backtrace "BackState.reflect" (fun wrapper ->
+      let body (l, e, k) = k (reflect (l e)) in
+      let body (c, l, e, k) = wrapper.wrap c c body (l, e, k) in
+      let body' (cons, x, s0, s, nil) = x.iolist s0 nil cons in
+      let body' (c, c', cons, x, s0, s, nil) = wrapper.wrap c' c (wrapper.unwrap c body') (cons, x, s0, s, nil) in
+      { iolist = fun s0 nil cons ->
+          let c = wrapper.generate () in
+          let next = function
+          | Nil e -> nil e
+          | Cons ((x, s), {r=l}) -> cons x s (fun e -> body (c, l, e, fun x -> let c' = wrapper.generate () in body' (c, c', cons, x, s0, s, nil)))
+          in
+          NonLogical.(m >>= next)
+      }
+    )
+    (* { iolist = fun s0 nil cons ->
       let next = function
       | Nil e -> nil e
       | Cons ((x, s), {r=l}) -> cons x s (fun e -> (reflect (l e)).iolist s0 nil cons)
       in
       NonLogical.(m >>= next)
-    }
+    } *)
 
   let split m : (_ list_view, _, _, _) t =
     let rnil e = NonLogical.return (Nil e) in
