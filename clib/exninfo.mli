@@ -92,3 +92,13 @@ val iraise : iexn -> 'a
 (** Raise the given enriched exception. *)
 
 val reify : unit -> info
+
+type wrapper = {
+  generate : unit -> int;
+  wrap : 'a 'b. int -> int -> ('a -> 'b) -> ('a -> 'b);
+  unwrap : 'a 'b. int -> ('a -> 'b) -> ('a -> 'b);
+}
+
+val save_additional_backtrace : string -> (wrapper -> 'c) -> 'c
+
+val get_additional_backtraces : info -> (int * string * backtrace) list option

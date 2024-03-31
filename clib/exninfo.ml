@@ -118,7 +118,53 @@ let capture e =
 
 let reify () =
   if !is_recording then
-    let bt = Printexc.get_callstack 50 in
+    let bt = Printexc.get_callstack 1000 in
     add null backtrace_info bt
   else
     null
+
+let additional_backtraces_info : (int * string * backtrace) list t = make "exninfo_additional_backtraces"
+
+type wrapper = {
+  generate : unit -> int;
+  wrap : 'a 'b. int -> int -> ('a -> 'b) -> ('a -> 'b);
+  unwrap : 'a 'b. int -> ('a -> 'b) -> ('a -> 'b);
+}
+
+let counter = ref 0
+
+let ignored_info : int list t = make "exninfo_ignored"
+
+let save_additional_backtrace s f =
+  if !is_recording then
+    let bt = Printexc.get_callstack 1000 in
+    f {
+      generate = (fun () ->
+        let c = !counter in
+        incr counter;
+        c
+      );
+      wrap = (fun c c' g x ->
+        try
+          g x
+        with exn ->
+          let (e, info) = capture exn in
+          let info =
+            if get info ignored_info |> Option.default [] |> List.mem c
+            then info
+            else add info additional_backtraces_info ((c', s, bt) :: (get info additional_backtraces_info |> Option.default [])) in
+          iraise (e, info)
+      );
+      unwrap = (fun c g x ->
+        try
+          g x
+        with exn ->
+          let (e, info) = capture exn in
+          let info = add info ignored_info (c :: (get info ignored_info |> Option.default [])) in
+          iraise (e, info)
+      );
+    }
+  else
+    f {generate = (fun () -> -1); wrap = (fun _ _ g -> g); unwrap = (fun _ g -> g)}
+
+let get_additional_backtraces e = get e additional_backtraces_info
