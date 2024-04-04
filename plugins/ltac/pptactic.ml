@@ -294,7 +294,7 @@ let string_of_genarg_arg (ArgumentType arg) =
       let pr _ = str "_" in
       hov 2 (KerName.print key ++ spc () ++ pr_sequence pr l ++ str " (* Generic printer *)")
 
-  let pr_farg prtac arg = prtac LevelSome (CAst.make (TacArg  arg))
+  let pr_tactic_arg prtac arg = prtac LevelSome (CAst.make (TacArg arg))
 
   let is_genarg tag wit =
     let ArgT.Any tag = tag in
@@ -345,9 +345,9 @@ let string_of_genarg_arg (ArgumentType arg) =
     | _ -> str "ltac:(" ++ prtac LevelSome arg ++ str ")"
 
   let pr_raw_extend_rec prtac =
-    pr_extend_gen (pr_farg prtac)
+    pr_extend_gen (pr_tactic_arg prtac)
   let pr_glob_extend_rec prtac =
-    pr_extend_gen (pr_farg prtac)
+    pr_extend_gen (pr_tactic_arg prtac)
 
   let pr_raw_alias prtac lev key args =
     pr_alias_gen (pr_targ (fun l a -> prtac l (CAst.make @@ TacArg a))) lev key args
@@ -1177,6 +1177,10 @@ let pr_goal_selector ~toplevel s =
   let pr_raw_generic = Pputils.pr_raw_generic
 
   let pr_glb_generic = Pputils.pr_glb_generic
+
+  let pr_raw_tactic_arg env sigma = pr_tactic_arg (pr_raw_tactic_level env sigma)
+
+  let pr_glob_tactic_arg env = pr_tactic_arg (pr_glob_tactic_level env)
 
   let pr_raw_extend env sigma = pr_raw_extend_rec @@ pr_raw_tactic_level env sigma
 
