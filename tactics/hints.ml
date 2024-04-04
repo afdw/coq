@@ -1620,7 +1620,7 @@ let pr_hint env sigma h = match h.obj with
   | Unfold_nth c ->
     str"unfold " ++  pr_evaluable_reference c
   | Extern (_, tac) ->
-    str "(*external*) " ++ Pputils.pr_glb_generic env sigma tac
+    str "(*external*) " ++ Pputils.pr_glb_generic env sigma None tac
 
 let pr_id_hint env sigma (id, v) =
   let pr_pat p = match p.pat with

@@ -657,7 +657,7 @@ let pr_goal_selector ~toplevel s =
     pr_reference : 'ref -> Pp.t;
     pr_name      : 'nam -> Pp.t;
     pr_occvar    : 'occvar -> Pp.t;
-    pr_generic   : Environ.env -> Evd.evar_map -> 'lev generic_argument -> Pp.t;
+    pr_generic   : Environ.env -> Evd.evar_map -> entry_relative_level option -> 'lev generic_argument -> Pp.t;
     pr_extend    : int -> ml_tactic_entry -> 'a gen_tactic_arg list -> Pp.t;
     pr_alias     : int -> KerName.t -> 'a gen_tactic_arg list -> Pp.t;
   }
@@ -893,7 +893,7 @@ let pr_goal_selector ~toplevel s =
               let llc = List.map (fun (id,t) -> (id,extract_binders t)) llc in
               hv 0
                 (hov 2 (
-                  pr_let_clauses recflag (pr.pr_generic env sigma) (pr_tac ltop) llc
+                  pr_let_clauses recflag (pr.pr_generic env sigma None) (pr_tac ltop) llc
                   ++ spc () ++ keyword "in"
                  ) ++ spc () ++ pr_tac (LevelLe llet) u),
               llet
@@ -1034,7 +1034,7 @@ let pr_goal_selector ~toplevel s =
             | TacArg (TacFreshId l) ->
               hov 1 (primitive "fresh" ++ pr_fresh_ids l), latom
             | TacArg (TacGeneric (isquot,arg)) ->
-              let p = pr.pr_generic env sigma arg in
+              let p = pr.pr_generic env sigma (Some inherited) arg in
               (match isquot with Some name -> str name ++ str ":(" ++ p ++ str ")" | None -> p), latom
             | TacArg (TacCall {CAst.v=(f,[])}) ->
               pr.pr_reference f, latom
