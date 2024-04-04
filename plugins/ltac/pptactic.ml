@@ -250,7 +250,7 @@ let string_of_genarg_arg (ArgumentType arg) =
         | [] -> mt ()
         | _ -> spc() ++ pr_sequence pr_gen l
       in
-      str "<" ++ name ++ str ">" ++ args
+      hov 2 (str "<" ++ name ++ str ">" ++ args)
 
   let rec pr_user_symbol = function
   | Extend.Ulist1 tkn -> "ne_" ^ pr_user_symbol tkn ^ "_list"
@@ -288,11 +288,11 @@ let string_of_genarg_arg (ArgumentType arg) =
       | _ -> raise Not_found
       in
       let prods = pack pp.pptac_prods l in
-      let p = pr_tacarg_using_rule pr_gen prods in
+      let p = hov 2 (pr_tacarg_using_rule pr_gen prods) in
       if pp.pptac_level > lev then surround p else p
     with Not_found ->
       let pr _ = str "_" in
-      KerName.print key ++ spc() ++ pr_sequence pr l ++ str" (* Generic printer *)"
+      hov 2 (KerName.print key ++ spc () ++ pr_sequence pr l ++ str " (* Generic printer *)")
 
   let pr_farg prtac arg = prtac LevelSome (CAst.make (TacArg  arg))
 
@@ -884,7 +884,7 @@ let pr_goal_selector ~toplevel s =
           let (loc, tac) = CAst.(tac.loc, tac.v) in
           let (strm, prec) = return (match tac with
             | TacAbstract (t,None) ->
-              keyword "abstract " ++ pr_tac (LevelLt labstract) t, labstract
+              hov 1 (keyword "abstract " ++ pr_tac (LevelLt labstract) t), labstract
             | TacAbstract (t,Some s) ->
               hov 0 (
                 keyword "abstract"
@@ -1019,12 +1019,12 @@ let pr_goal_selector ~toplevel s =
                 ++ prlist (pr_arg (pr_message_token pr.pr_name)) l),
               latom
             | TacFirst tl ->
-              keyword "first" ++ spc () ++ pr_seq_body (pr_tac ltop) tl, llet
+              hov 1 (keyword "first" ++ spc () ++ pr_seq_body (pr_tac ltop) tl), llet
             | TacSolve tl ->
-              keyword "solve" ++ spc () ++ pr_seq_body (pr_tac ltop) tl, llet
-            | TacSelect (s, tac) -> pr_goal_selector ~toplevel:false s ++ spc () ++ pr_tac ltop tac, ltactical
+              hov 1 (keyword "solve" ++ spc () ++ pr_seq_body (pr_tac ltop) tl), llet
+            | TacSelect (s, tac) -> hov 2 (pr_goal_selector ~toplevel:false s ++ spc () ++ pr_tac ltop tac), ltactical
             | TacId l ->
-              keyword "idtac" ++ prlist (pr_arg (pr_message_token pr.pr_name)) l, latom
+              hov 1 (keyword "idtac" ++ prlist (pr_arg (pr_message_token pr.pr_name)) l), latom
             | TacAtom t ->
               pr_with_comments ?loc (hov 1 (pr_atom env sigma pr strip_prod_binders tag_atom t)), ltatom
             | TacArg (Tacexp e) ->
@@ -1034,7 +1034,7 @@ let pr_goal_selector ~toplevel s =
             | TacArg (ConstrMayEval c) ->
               pr_may_eval env sigma pr.pr_constr pr.pr_lconstr pr.pr_constant pr.pr_red_pattern pr.pr_occvar c, leval
             | TacArg (TacFreshId l) ->
-              primitive "fresh" ++ pr_fresh_ids l, latom
+              hov 1 (primitive "fresh" ++ pr_fresh_ids l), latom
             | TacArg (TacGeneric (isquot,arg)) ->
               let p = pr.pr_generic env sigma arg in
               (match isquot with Some name -> str name ++ str ":(" ++ p ++ str ")" | None -> p), latom
@@ -1062,11 +1062,11 @@ let pr_goal_selector ~toplevel s =
           | ConstrMayEval c ->
             pr_may_eval env sigma pr.pr_constr pr.pr_lconstr pr.pr_constant pr.pr_red_pattern pr.pr_occvar c
           | TacFreshId l ->
-            keyword "fresh" ++ pr_fresh_ids l
+            hov 1 (keyword "fresh" ++ pr_fresh_ids l)
           | TacPretype c ->
-            keyword "type_term" ++ pr.pr_constr env sigma c
+            hov 1 (keyword "type_term" ++ spc () ++ pr.pr_constr env sigma c)
           | TacNumgoals ->
-            keyword "numgoals"
+            hov 1 (keyword "numgoals")
           | (TacCall _|Tacexp _ | TacGeneric _) as a ->
             hov 0 (keyword "ltac:" ++ surround (pr_tac ltop (CAst.make (TacArg a))))
 
