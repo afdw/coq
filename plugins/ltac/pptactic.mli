@@ -136,13 +136,11 @@ val pr_raw_extend: env -> Evd.evar_map -> int ->
 val pr_glob_extend: env -> int ->
   ml_tactic_entry -> glob_tactic_arg list -> Pp.t
 
-val pr_extend :
-  (Val.t -> Pp.t) -> int -> ml_tactic_entry -> Val.t list -> Pp.t
+val pr_extend : ('a -> Pp.t) -> int -> ml_tactic_entry -> 'a list -> Pp.t
 
 val pr_alias_key : Names.KerName.t -> Pp.t
 
-val pr_alias : (Val.t -> Pp.t) ->
-  int -> Names.KerName.t -> Val.t list -> Pp.t
+val pr_alias : ('a -> Pp.t) -> int -> Names.KerName.t -> 'a list -> Pp.t
 
 val pr_ltac_constant : ltac_constant -> Pp.t
 
