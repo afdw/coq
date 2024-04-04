@@ -579,14 +579,12 @@ let pr_goal_selector ~toplevel s =
          else
            str name ++ str ":" ++ surround (pr_gen arg)
       | _ -> pr_arg (CAst.make (TacArg t)) in
-    hov 0 (keyword k ++ spc () ++ pr_lname na ++ prlist pr_funvar bl ++
-             str " :=" ++ brk (1,1) ++ pr t)
+    keyword k ++ spc () ++ pr_lname na ++ prlist pr_funvar bl ++ str " :=" ++ spc () ++ pr t
 
   let pr_let_clauses recflag pr_gen pr = function
     | hd::tl ->
-      hv 0
-        (pr_let_clause (if recflag then "let rec" else "let") pr_gen pr hd ++
-           prlist (fun t -> spc () ++ pr_let_clause "with" pr_gen pr t) tl)
+      pr_let_clause (if recflag then "let rec" else "let") pr_gen pr hd ++
+        prlist (fun t -> spc () ++ pr_let_clause "with" pr_gen pr t) tl
     | [] -> anomaly (Pp.str "LetIn must declare at least one binding.")
 
   let pr_seq_body pr tl =
@@ -889,11 +887,11 @@ let pr_goal_selector ~toplevel s =
               labstract
             | TacLetIn (recflag,llc,u) ->
               let llc = List.map (fun (id,t) -> (id,extract_binders t)) llc in
-              v 0
-                (hv 0 (
+              hv 0
+                (hov 2 (
                   pr_let_clauses recflag (pr.pr_generic env sigma) (pr_tac ltop) llc
                   ++ spc () ++ keyword "in"
-                 ) ++ fnl () ++ pr_tac (LevelLe llet) u),
+                 ) ++ spc () ++ pr_tac (LevelLe llet) u),
               llet
             | TacMatch (lz,t,lrul) ->
               hov 0 (
