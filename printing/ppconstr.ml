@@ -618,7 +618,7 @@ let tag_var = tag Tag.variable
   | Rawarg of Genarg.raw_generic_argument
   | Globarg of Genarg.glob_generic_argument
 
-  let pr_genarg return arg =
+  let pr_genarg return n arg =
     (* In principle this may use the env/sigma, in practice not sure if it
        does except through pr_constr_expr in beautify mode. *)
     let env = Global.env() in
@@ -628,13 +628,13 @@ let tag_var = tag Tag.variable
       | Globarg arg ->
         let GenArg (Glbwit tag, _) = arg in
         begin match tag with
-        | ExtraArg tag -> ArgT.repr tag, Pputils.pr_glb_generic env sigma arg
+        | ExtraArg tag -> ArgT.repr tag, Pputils.pr_glb_generic env sigma (Some n) arg
         | _ -> assert false
         end
       | Rawarg arg ->
         let GenArg (Rawwit tag, _) = arg in
         begin match tag with
-        | ExtraArg tag -> ArgT.repr tag, Pputils.pr_raw_generic env sigma arg
+        | ExtraArg tag -> ArgT.repr tag, Pputils.pr_raw_generic env sigma (Some n) arg
         | _ -> assert false
         end
     in
@@ -770,8 +770,8 @@ let tag_var = tag Tag.variable
       | CHole (Some (GNamedHole (true, id))) ->
         return (fun lev_after -> str "?[?" ++ pr_id id ++ str "]") latom
       | CHole _ -> return (fun lev_after -> str "_") latom
-      | CGenarg arg -> pr_genarg return (Rawarg arg)
-      | CGenargGlob arg -> pr_genarg return (Globarg arg)
+      | CGenarg arg -> pr_genarg return inherited (Rawarg arg)
+      | CGenargGlob arg -> pr_genarg return inherited (Globarg arg)
       | CEvar (n,l) ->
         return (fun lev_after -> pr_evar (pr mt) n l) latom
       | CPatVar p ->
