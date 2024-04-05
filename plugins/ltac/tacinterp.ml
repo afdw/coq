@@ -94,9 +94,13 @@ let push_appl appl args =
   match appl with
   | UnnamedAppl -> UnnamedAppl
   | GlbAppl l -> GlbAppl (List.map (fun (h,vs) -> (h,vs@args)) l)
-let pr_generic arg =
-    let Val.Dyn (tag, _) = arg in
-    str"<" ++ Val.pr tag ++ str ":(" ++ Pptactic.pr_value Pptactic.ltop arg ++ str ")>"
+let pr_generic v =
+  let Val.Dyn (tag, _) = v in
+  let pr_v =
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    Pptactic.pr_value ~context:(env, sigma) Pptactic.ltop v in
+  str "<" ++ Val.pr tag ++ str ":(" ++ pr_v ++ str ")>"
 let pr_appl h vs =
   if vs = [] then
     Pptactic.pr_ltac_constant h
@@ -176,7 +180,8 @@ let ensure_loc loc ist =
     | None -> { ist with extra = TacStore.set ist.extra f_loc loc }
     | Some _ -> ist
 
-let print_top_val v = Pptactic.pr_value Pptactic.ltop v
+let print_top_val env sigma v =
+  Pptactic.pr_value ~context:(env, sigma) Pptactic.ltop v
 
 let catching_error call_trace fail (e, info) =
   let inner_trace =
@@ -1227,12 +1232,13 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           val_interp_ftactic ist alias.alias_body >>= fun v ->
           let tac = tactic_of_value ist v in
           Ftactic.return (lr, tac) in
-        Ftactic.run tac_ftactic (fun (lr, tac) ->
-          (* spiwack: this use of [name_tactic] is not robust to a
+        Ftactic.run (Ftactic.with_env tac_ftactic) (fun (env, (lr, tac)) ->
+          Proofview.tclEVARMAP >>= fun sigma ->
+          (* spiwack: this use of [tag_tactic] is not robust to a
              change of implementation of [Ftactic]. In such a situation,
              some more elaborate solution will have to be used. *)
           Proofview.Trace.name_tactic
-            (fun () -> Pptactic.pr_alias print_top_val 0 s lr)
+            (fun () -> Pptactic.pr_alias (print_top_val env sigma) 0 s lr)
             tac
         )
       else
@@ -1241,14 +1247,16 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           (str "Arguments length mismatch: expected " ++ int len1 ++ str ", found " ++ int len2)
 
   | TacML (opn, l) ->
+      Proofview.tclENV >>= fun env ->
       let trace = push_trace (Loc.tag ?loc @@ LtacMLCall tac) ist in
       let ist = {ist with extra = TacStore.set ist.extra f_trace trace} in
       let lr_ftactic = l |> Ftactic.List.map_right (interp_tacarg_ftactic ist) in
       let tac = Tacenv.interp_ml_tactic opn in
-      Ftactic.run lr_ftactic (fun lr ->
+      Ftactic.run (Ftactic.with_env lr_ftactic) (fun (env, lr) ->
         let (stack, _) = trace in
+        Proofview.tclEVARMAP >>= fun sigma ->
         Proofview.Trace.name_tactic
-          (fun () -> Pptactic.pr_extend print_top_val 0 opn lr)
+          (fun () -> Pptactic.pr_extend (print_top_val env sigma) 0 opn lr)
           (catch_error_tac_loc loc stack (tac lr ist))
       )
 

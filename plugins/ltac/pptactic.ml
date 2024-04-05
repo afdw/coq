@@ -130,14 +130,16 @@ let string_of_genarg_arg (ArgumentType arg) =
   | None -> assert false
   | Some Refl -> x
 
-  let rec pr_value lev v : Pp.t =
+  exception ContextRequired
+
+  let rec pr_value ?context lev v : Pp.t =
     if has_type v Val.typ_list then
-      pr_sequence (fun x -> pr_value lev x) (unbox v Val.typ_list)
+      pr_sequence (fun x -> pr_value ?context lev x) (unbox v Val.typ_list)
     else if has_type v Val.typ_opt then
-      pr_opt_no_spc (fun x -> pr_value lev x) (unbox v Val.typ_opt)
+      pr_opt_no_spc (fun x -> pr_value ?context lev x) (unbox v Val.typ_opt)
     else if has_type v Val.typ_pair then
       let (v1, v2) = unbox v Val.typ_pair in
-      str "(" ++ pr_value lev v1 ++ str ", " ++ pr_value lev v2 ++ str ")"
+      str "(" ++ pr_value ?context lev v1 ++ str ", " ++ pr_value ?context lev v2 ++ str ")"
     else
       let Val.Dyn (tag, x) = v in
       let name = Val.repr tag in
@@ -151,15 +153,17 @@ let string_of_genarg_arg (ArgumentType arg) =
           begin match Val.eq t tag with
           | None -> default
           | Some Refl ->
-             let open Genprint in
-             match generic_top_print (in_gen (Topwit wit) x) with
-             | TopPrinterBasic pr -> pr ()
-             | TopPrinterNeedsContext pr ->
-               let env = Global.env() in
-               pr env (Evd.from_env env)
-             | TopPrinterNeedsContextAndLevel { default_ensure_surrounded; printer } ->
-               let env = Global.env() in
-               printer env (Evd.from_env env) default_ensure_surrounded
+            let open Genprint in
+            match generic_top_print (in_gen (Topwit wit) x) with
+            | TopPrinterBasic printer -> printer ()
+            | TopPrinterNeedsContext printer ->
+              (match context with
+              | Some (env, sigma) -> printer env sigma
+              | None -> raise ContextRequired)
+            | TopPrinterNeedsContextAndLevel { default_ensure_surrounded; printer } ->
+              (match context with
+              | Some (env, sigma) -> printer env sigma default_ensure_surrounded
+              | None -> raise ContextRequired)
           end
         | _ -> default
 
