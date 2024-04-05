@@ -161,7 +161,9 @@ val pr_match_pattern : ('a -> Pp.t) -> 'a match_pattern -> Pp.t
 val pr_match_rule : bool -> ('a -> Pp.t) -> ('b -> Pp.t) ->
   ('b, 'a) match_rule -> Pp.t
 
-val pr_value : entry_relative_level -> Val.t -> Pp.t
+exception ContextRequired
+
+val pr_value : ?context:(env * Evd.evar_map) -> entry_relative_level -> Val.t -> Pp.t
 
 val pp_ltac_call_kind : ltac_call_kind -> Pp.t
 
