@@ -441,7 +441,7 @@ let (wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type) =
     | VFun (a,_,loc,ids,l,tac) ->
       let tac = if List.is_empty l then tac else CAst.make ?loc @@ Tacexpr.TacFun (l,tac) in
       let pr_env env sigma = if Id.Map.is_empty ids then mt () else cut () ++ str "where" ++ Id.Map.fold (fun id c pp -> cut () ++ Id.print id ++ str " := " ++ pr_value (Some (env,sigma)) c ++ pp) ids (mt ()) in
-      Genprint.TopPrinterNeedsContext (fun env sigma -> v 0 (hov 0 (Pptactic.pr_glob_tactic env tac) ++ pr_env env sigma))
+      Genprint.TopPrinterNeedsContext (fun env sigma -> v 0 (hov 0 (Pptactic.pr_glob_tactic env sigma tac) ++ pr_env env sigma))
     | _ -> Genprint.TopPrinterBasic (fun _ -> str "<tactic closure>") in
   let () = Genprint.register_val_print0 (base_val_typ wit) pr in
   wit

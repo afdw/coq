@@ -306,7 +306,10 @@ let ppenvwithcst e = pp
    str "[" ++ pr_rel_context e Evd.empty (rel_context e) ++ str "]" ++ spc() ++
    str "{" ++ Environ.fold_constants (fun a _ s -> Constant.print a ++ spc () ++ s) e (mt ()) ++ str "}")
 
-let pptac = (fun x -> pp(Ltac_plugin.Pptactic.pr_glob_tactic (Global.env()) x))
+let pptac x =
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
+  pp (Ltac_plugin.Pptactic.pr_glob_tactic env sigma x)
 
 let ppobj obj =
   let Libobject.Dyn.Dyn (tag, _) = obj in

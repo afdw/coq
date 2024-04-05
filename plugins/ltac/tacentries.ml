@@ -575,10 +575,12 @@ let print_ltac_body qid tac =
     fnl () ++ str "Redefined by:" ++ fnl () ++ redef
   in
   let l,t = split_ltac_fun tac.Tacenv.tac_body in
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
   hv 2 (
     hov 2 (str "Ltac" ++ spc() ++ pr_qualid qid ++
            prlist pr_ltac_fun_arg l ++ spc () ++ str ":=")
-    ++ spc() ++ Pptactic.pr_glob_tactic (Global.env ()) t) ++ redefined
+    ++ spc() ++ Pptactic.pr_glob_tactic env sigma t) ++ redefined
 
 let () =
   let open Prettyp in

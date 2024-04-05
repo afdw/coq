@@ -165,7 +165,7 @@ let () =
       if List.is_empty ids then mt ()
       else pr_sequence Id.print ids ++ spc () ++ str "|-" ++ spc ()
     in
-    str "ltac1:(" ++ ids ++ Ltac_plugin.Pptactic.pr_glob_tactic env tac ++ str ")"
+    str "ltac1:(" ++ ids ++ Ltac_plugin.Pptactic.pr_glob_tactic env sigma tac ++ str ")"
   in
   let raw_print env sigma (ids, tac) =
     let ids =
@@ -222,7 +222,7 @@ let () =
       if List.is_empty ids then mt ()
       else pr_sequence Id.print ids ++ str " |- "
     in
-    str "ltac1val:(" ++ ids++ Ltac_plugin.Pptactic.pr_glob_tactic env tac ++ str ")"
+    str "ltac1val:(" ++ ids++ Ltac_plugin.Pptactic.pr_glob_tactic env sigma tac ++ str ")"
   in
   let raw_print env sigma (ids, tac) =
     let ids =

@@ -128,12 +128,12 @@ val pr_glb_generic : env -> Evd.evar_map -> entry_relative_level option -> gleve
 
 val pr_raw_tactic_arg : env -> Evd.evar_map -> raw_tactic_arg -> Pp.t
 
-val pr_glob_tactic_arg : env -> glob_tactic_arg -> Pp.t
+val pr_glob_tactic_arg : env -> Evd.evar_map -> glob_tactic_arg -> Pp.t
 
 val pr_raw_extend: env -> Evd.evar_map -> int ->
   ml_tactic_entry -> raw_tactic_arg list -> Pp.t
 
-val pr_glob_extend: env -> int ->
+val pr_glob_extend: env -> Evd.evar_map -> int ->
   ml_tactic_entry -> glob_tactic_arg list -> Pp.t
 
 val pr_extend : ('a -> Pp.t) -> int -> ml_tactic_entry -> 'a list -> Pp.t
@@ -148,7 +148,7 @@ val pr_raw_tactic : env -> Evd.evar_map -> raw_tactic_expr -> Pp.t
 
 val pr_raw_tactic_level : env -> Evd.evar_map -> entry_relative_level -> raw_tactic_expr -> Pp.t
 
-val pr_glob_tactic : env -> glob_tactic_expr -> Pp.t
+val pr_glob_tactic : env -> Evd.evar_map -> glob_tactic_expr -> Pp.t
 
 val pr_atomic_tactic : env -> Evd.evar_map -> atomic_tactic_expr -> Pp.t
 
