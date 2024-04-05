@@ -105,7 +105,10 @@ let to_option v = prj Val.typ_opt v
 let to_pair v = prj Val.typ_pair v
 
 let cast_error wit v =
-  let pr_v = Pptactic.pr_value Pptactic.ltop v in
+  let pr_v =
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    Pptactic.pr_value ~context:(env, sigma) Pptactic.ltop v in
   let Val.Dyn (tag, _) = v in
   let tag = Val.pr tag in
   CErrors.user_err (str "Type error: value " ++ pr_v ++ str " is a " ++ tag
