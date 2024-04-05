@@ -94,5 +94,8 @@ let declare_tactic_option ?(default=CAst.make (Tacexpr.TacId[])) name =
     Lib.add_leaf (input (local, tac))
   in
   let get () = Tacinterp.eval_tactic !default_tactic in
-  let print () = Pptactic.pr_glob_tactic (Global.env ()) !default_tactic in
+  let print () =
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    Pptactic.pr_glob_tactic env sigma !default_tactic in
   put, get, print

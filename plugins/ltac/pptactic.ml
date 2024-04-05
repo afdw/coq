@@ -1108,7 +1108,7 @@ let pr_goal_selector ~toplevel s =
 
   let pr_pat_and_constr_expr pr (_,(c,_),_) = pr c
 
-  let pr_glob_tactic_level env n t =
+  let pr_glob_tactic_level env sigma n t =
     let glob_printers =
       (strip_prod_binders_glob_constr)
     in
@@ -1127,14 +1127,14 @@ let pr_goal_selector ~toplevel s =
         pr_extend = pr_glob_extend_rec prtac;
         pr_alias = pr_glob_alias prtac;
       } in
-      make_pr_tac env (Evd.from_env env)
+      make_pr_tac env sigma
         pr glob_printers
         tag_glob_atomic_tactic_expr tag_glob_tactic_expr
         n t
     in
     prtac n t
 
-  let pr_glob_tactic env = pr_glob_tactic_level env ltop
+  let pr_glob_tactic env sigma = pr_glob_tactic_level env sigma ltop
 
   let strip_prod_binders_constr n ty =
     let ty = EConstr.Unsafe.to_constr ty in
@@ -1174,11 +1174,11 @@ let pr_goal_selector ~toplevel s =
 
   let pr_raw_tactic_arg env sigma = pr_tactic_arg (pr_raw_tactic_level env sigma)
 
-  let pr_glob_tactic_arg env = pr_tactic_arg (pr_glob_tactic_level env)
+  let pr_glob_tactic_arg env sigma = pr_tactic_arg (pr_glob_tactic_level env sigma)
 
   let pr_raw_extend env sigma = pr_raw_extend_rec @@ pr_raw_tactic_level env sigma
 
-  let pr_glob_extend env = pr_glob_extend_rec (pr_glob_tactic_level env)
+  let pr_glob_extend env sigma = pr_glob_extend_rec (pr_glob_tactic_level env sigma)
 
   let pr_alias pr lev key args =
     pr_alias_gen (fun _ arg -> pr arg) lev key args
@@ -1194,13 +1194,15 @@ let pp_ltac_call_kind = function
   (* todo: don't want the KerName instead? *)
   | LtacVarCall (_, id, t) -> Names.Id.print id
   | LtacAtomCall te ->
-    pr_glob_tactic (Global.env ())
-      (CAst.make (TacAtom te))
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    pr_glob_tactic env sigma (CAst.make (TacAtom te))
   | LtacConstrInterp (env, sigma, c, _) ->
     pr_glob_constr_env env sigma c
   | LtacMLCall te ->
-    (pr_glob_tactic (Global.env ())
-       te)
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    pr_glob_tactic env sigma te
 
 let declare_extra_genarg_pprule wit
   (f : 'a raw_extra_genarg_printer)
@@ -1217,7 +1219,7 @@ let declare_extra_genarg_pprule wit
     Genprint.PrinterBasic (fun env sigma ->
     g env sigma (fun env sigma -> pr_and_constr_expr (pr_glob_constr_env env sigma))
       (fun env sigma -> pr_and_constr_expr (pr_lglob_constr_env env sigma))
-      (fun env sigma -> pr_glob_tactic_level env) x)
+      (fun env sigma -> pr_glob_tactic_level env sigma) x)
   in
   let h x =
     Genprint.TopPrinterNeedsContext (fun env sigma ->
@@ -1247,7 +1249,7 @@ let declare_extra_genarg_pprule_with_level wit
         printer = (fun env sigma n ->
           g env sigma (fun env sigma -> pr_and_constr_expr (pr_glob_constr_env env sigma))
             (fun env sigma -> pr_and_constr_expr (pr_lglob_constr_env env sigma))
-            (fun env sigma -> pr_glob_tactic_level env) n x) }
+            (fun env sigma -> pr_glob_tactic_level env sigma) n x) }
   in
   let h x =
     TopPrinterNeedsContextAndLevel {
