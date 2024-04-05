@@ -8,6 +8,8 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+val a : int ref
+
 (** This file defines the most important datatype of Coq, namely kernel terms,
     as well as a handful of generic manipulation functions. *)
 
