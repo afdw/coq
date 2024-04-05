@@ -243,8 +243,8 @@ let curr_debug ist = match TacStore.get ist.extra f_debug with
 | None -> DebugOff
 | Some level -> level
 
-let pr_closure env ist body =
-  let pp_body = Pptactic.pr_glob_tactic env body in
+let pr_closure env sigma ist body =
+  let pp_body = Pptactic.pr_glob_tactic env sigma body in
   let pr_sep () = fnl () in
   let pr_iarg (id, arg) =
     let arg = pr_argument_type arg in
@@ -253,16 +253,16 @@ let pr_closure env ist body =
   let pp_iargs = v 0 (prlist_with_sep pr_sep pr_iarg (Id.Map.bindings ist)) in
   pp_body ++ fnl() ++ str "in environment " ++ fnl() ++ pp_iargs
 
-let pr_inspect env expr result =
-  let pp_expr = Pptactic.pr_glob_tactic env expr in
+let pr_inspect env sigma expr result =
+  let pp_expr = Pptactic.pr_glob_tactic env sigma expr in
   let pp_result =
     if has_type result (topwit wit_tacvalue) then
     match to_tacvalue result with
     | VFun (_, _, _, ist, ul, b) ->
       let body = if List.is_empty ul then b else CAst.make (TacFun (ul, b)) in
-      str "a closure with body " ++ fnl() ++ pr_closure env ist body
+      str "a closure with body " ++ fnl() ++ pr_closure env sigma ist body
     | VRec (ist, body) ->
-      str "a recursive closure" ++ fnl () ++ pr_closure env !ist body
+      str "a recursive closure" ++ fnl () ++ pr_closure env sigma !ist body
     else
       let pp_type = pr_argument_type result in
       str "an object of type" ++ spc () ++ pp_type
@@ -1636,10 +1636,11 @@ and interp_ltac_constr_ftactic ist e : EConstr.t Ftactic.t =
         | Not_found ->
             Ftactic.enter begin fun gl ->
               let env = Proofview.Goal.env gl in
+              let sigma = Proofview.Goal.sigma gl in
               Proofview.tclLIFT begin
                 debugging_step ist (fun () ->
                   str "evaluation failed for" ++ fnl() ++
-                    Pptactic.pr_glob_tactic env e)
+                    Pptactic.pr_glob_tactic env sigma e)
               end
             <*> Proofview.tclZERO Not_found
             end
@@ -1653,7 +1654,7 @@ and interp_ltac_constr_ftactic ist e : EConstr.t Ftactic.t =
     let cresult = coerce_to_closed_constr env result in
     Proofview.tclLIFT begin
       debugging_step ist (fun () ->
-        Pptactic.pr_glob_tactic env e ++ fnl() ++
+        Pptactic.pr_glob_tactic env sigma e ++ fnl() ++
           str " has value " ++ fnl() ++
           pr_econstr_env env sigma cresult)
     end <*>
@@ -1661,9 +1662,10 @@ and interp_ltac_constr_ftactic ist e : EConstr.t Ftactic.t =
   with CannotCoerceTo _ as exn ->
     let _, info = Exninfo.capture exn in
     let env = Proofview.Goal.env gl in
+    let sigma = Proofview.Goal.sigma gl in
     Tacticals.tclZEROMSG ~info
       (str "Must evaluate to a closed term" ++ fnl() ++
-       str "offending expression: " ++ fnl() ++ pr_inspect env e result)
+       str "offending expression: " ++ fnl() ++ pr_inspect env sigma e result)
   end
 
 (** Interprets an expression that evaluates to a constr *)
