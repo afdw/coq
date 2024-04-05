@@ -8,6 +8,8 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+let a = ref 0
+
 (* File initially created by Gérard Huet and Thierry Coquand in 1984 *)
 (* Extension to inductive constructions by Christine Paulin for Coq V5.6 *)
 (* Extension to mutual inductive constructions by Christine Paulin for

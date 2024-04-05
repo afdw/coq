@@ -45,7 +45,7 @@
 (alias
  (name coqtop.byte-prelude)
  (deps
-  %{project_root}/theories/Init/Prelude.vo
+  ; %{project_root}/theories/Init/Prelude.vo
   %{bin:coqtop.byte}
   %{lib:coq-core.config:config.cma}
   %{lib:coq-core.clib:clib.cma}
