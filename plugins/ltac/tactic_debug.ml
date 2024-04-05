@@ -202,9 +202,13 @@ let get_vars framenum =
 (*  Printf.printf "server: db_vars call\n%!";*)
   let vars = List.nth debugger_state.varmaps framenum in
   List.map (fun b ->
-      let (id, v) = b in
-      (Id.to_string id, Pptactic.pr_value Constrexpr.LevelSome v)
-    ) (Id.Map.bindings vars)
+    let (id, v) = b in
+    let pr_v =
+      let env = Global.env () in
+      let sigma = Evd.from_env env in
+      Pptactic.pr_value ~context:(env, sigma) Constrexpr.LevelSome v in
+    (Id.to_string id, pr_v)
+  ) (Id.Map.bindings vars)
 
 [@@@ocaml.warning "-32"]
 let cmd_to_str cmd =
@@ -569,9 +573,13 @@ let dump_varmaps msg varmaps =
     List.iter (fun varmap ->
         Printf.printf "%s: varmap len = %d\n" msg (Id.Map.cardinal varmap);
         List.iter (fun b ->
-            let (k, b) = b in
-            Printf.printf "id = %s\n%!" (Id.to_string k);
-            ignore @@ Pptactic.pr_value Constrexpr.LevelSome b (* todo: LevelSome?? *)
+            let (id, v) = b in
+            let pr_v =
+              let env = Global.env () in
+              let sigma = Evd.from_env env in
+              Pptactic.pr_value ~context:(env, sigma) Constrexpr.LevelSome v (* todo: LevelSome?? *) in
+            Printf.printf "id = %s\n%!" (Id.to_string id);
+            ignore @@ pr_v
             (* b is Geninterp.Val.t Names.Id.Map.t *)
           ) (Id.Map.bindings varmap)
       ) varmaps
