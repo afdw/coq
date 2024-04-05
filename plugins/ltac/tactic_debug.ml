@@ -19,7 +19,8 @@ let (ltac_trace_info : ltac_stack Exninfo.t) = Exninfo.make "ltac_trace"
 
 let prtac x =
   let env = Global.env () in
-  Pptactic.pr_glob_tactic env x
+  let sigma = Evd.from_env env in
+  Pptactic.pr_glob_tactic env sigma x
 
 (* This module intends to be a beginning of debugger for tactic expressions.
    Currently, it is quite simple and we can hope to have, in the future, a more
