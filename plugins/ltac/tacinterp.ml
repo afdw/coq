@@ -1104,6 +1104,7 @@ let type_uconstr ?(flags = (constr_flags ()))
 
 (* Interprets an l-tac expression into a value *)
 let rec val_interp_ftactic ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : Val.t Ftactic.t =
+  Feedback.msg_info Pp.(str "val_interp_ftactic " ++ Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac);
   (* The name [appl] of applied top-level Ltac names is ignored in
      [aux]. It is installed in the second step by a call to
      [name_vfun], because it gives more opportunities to detect a
@@ -1118,8 +1119,9 @@ let rec val_interp_ftactic ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : 
     | TacLetIn (false, l, u) -> interp_letin ist l u
     | TacMatchGoal (lz, lr, lmr) -> interp_match_goal ist lz lr lmr
     | TacMatch (lz, c, lmr) -> interp_match ist lz c lmr
-    | TacArg v -> interp_tacarg_ftactic ist v
+    | TacArg v -> Feedback.msg_info Pp.(str "TacArg"); interp_tacarg_ftactic ist v
     | _ ->
+      Feedback.msg_info Pp.(str "val_interp_ftactic: Delayed evaluation");
       (* Delayed evaluation *)
       Ftactic.return (of_tacvalue (VFun (UnnamedAppl, extract_trace ist, extract_loc ist, ist.lfun, [], tac))) in
   Control.check_for_interrupt ();
@@ -1143,6 +1145,7 @@ and interp_tactic ist tac : unit Proofview.tactic =
   val_interp ist tac (fun v -> tactic_of_value ist v)
 
 and eval_tactic_ist ist tac : unit Proofview.tactic =
+  Feedback.msg_info Pp.(str "eval_tactic_ist " ++ Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac);
   let loc = tac.loc in
   match tac.v with
   | TacAtom t ->
@@ -1220,6 +1223,7 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
 
   (* For extensions *)
   | TacAlias (s, l) ->
+      Feedback.msg_info Pp.(str "TacAlias");
       let alias = Tacenv.interp_alias s in
       let len1 = List.length alias.alias_args in
       let len2 = List.length l in
@@ -1250,6 +1254,7 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           (str "Arguments length mismatch: expected " ++ int len1 ++ str ", found " ++ int len2)
 
   | TacML (opn, l) ->
+      Feedback.msg_info Pp.(str "TacML");
       Proofview.tclENV >>= fun env ->
       let trace = push_trace (Loc.tag ?loc @@ LtacMLCall tac) ist in
       let ist = {ist with extra = TacStore.set ist.extra f_trace trace} in
@@ -1272,6 +1277,7 @@ and force_vrec_ftactic ist v : Val.t Ftactic.t =
   else Ftactic.return v
 
 and interp_ltac_reference_ftactic ?loc' mustbetac ist r : Val.t Ftactic.t =
+  Feedback.msg_info Pp.(str "interp_ltac_reference_ftactic " ++ Pptactic.pr_glob_tactic_arg (Global.env ()) (Evd.from_env (Global.env ())) (Reference r));
   match r with
   | ArgVar {loc; v = id} ->
       let (>>=) = Ftactic.bind in
@@ -1297,6 +1303,7 @@ and interp_ltac_reference_ftactic ?loc' mustbetac ist r : Val.t Ftactic.t =
           (val_interp_ftactic ~appl ist (Tacenv.interp_ltac r)))
 
 and interp_tacarg_ftactic ist arg : Val.t Ftactic.t =
+  Feedback.msg_info Pp.(str "interp_tacarg_ftactic " ++ Pptactic.pr_glob_tactic_arg (Global.env ()) (Evd.from_env (Global.env ())) arg);
   match arg with
   | TacGeneric (_, arg) -> interp_genarg ist arg
   | Reference r -> interp_ltac_reference_ftactic false ist r
@@ -1408,6 +1415,7 @@ and interp_app loc ist fv largs : Val.t Ftactic.t =
 
 (* Gives the tactic corresponding to the tactic value *)
 and tactic_of_value ist vle =
+  Feedback.msg_info (str "tactic_of_value " ++ pr_generic vle);
   if has_type vle (topwit wit_tacvalue) then
   match to_tacvalue vle with
   | VFun (appl,trace,loc,lfun,[],t) ->
@@ -2059,6 +2067,7 @@ let hide_interp {global;ast} =
   let hide_interp env =
     let ist = Genintern.empty_glob_sign ~strict:false env in
     let te = intern_pure_tactic ist ast in
+    Feedback.msg_info Pp.(str "hide_interp " ++ Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) te);
     let t = eval_tactic te in
     t
   in
