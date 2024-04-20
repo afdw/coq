@@ -1024,7 +1024,7 @@ let pr_goal_selector ~toplevel s =
             | TacArg (Tacexp e) ->
               pr_tac inherited e, latom
             | TacArg (ConstrMayEval (ConstrTerm c)) ->
-              keyword "constr:" ++ pr.pr_constr env sigma c, latom
+              keyword "constr" ++ str ":(" ++ pr.pr_constr env sigma c ++ str ")", latom
             | TacArg (ConstrMayEval c) ->
               pr_may_eval env sigma pr.pr_constr pr.pr_lconstr pr.pr_constant pr.pr_pattern c, leval
             | TacArg (TacFreshId l) ->
