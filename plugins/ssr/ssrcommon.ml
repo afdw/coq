@@ -192,7 +192,7 @@ let interp_open_constr env sigma ist gc =
 let interp_term env sigma ist (_, c) = interp_open_constr env sigma ist c
 
 let interp_hyp ist env sigma (SsrHyp (loc, id)) =
-  let id' = Tacinterp.interp_hyp ist env sigma CAst.(make ?loc id) in
+  let id' = (Tacinterp.interp_hyp ist env sigma CAst.(make ?loc id)).Proofview.Named.v in
   if not_section_id id' then SsrHyp (loc, id') else
   hyp_err ?loc "Can't clear section hypothesis " id'
 

@@ -83,7 +83,7 @@ val print_ltac : Libnames.qualid -> Pp.t
 
 type (_, 'a) ml_ty_sig =
 | MLTyNil : ('a, 'a) ml_ty_sig
-| MLTyArg : ('r, 'a) ml_ty_sig -> (Geninterp.Val.t -> 'r, 'a) ml_ty_sig
+| MLTyArg : ('r, 'a) ml_ty_sig -> (Geninterp.NamedVal.t -> 'r, 'a) ml_ty_sig
 
 val ml_tactic_extend : plugin:string -> name:string -> local:locality_flag ->
   ?deprecation:Deprecation.t -> ('r, unit Proofview.tactic) ml_ty_sig -> 'r -> unit
@@ -94,7 +94,7 @@ val ml_tactic_extend : plugin:string -> name:string -> local:locality_flag ->
     argument. *)
 
 val ml_val_tactic_extend : plugin:string -> name:string -> local:locality_flag ->
-  ?deprecation:Deprecation.t -> ('r, Geninterp.Val.t Ftactic.t) ml_ty_sig -> 'r -> unit
+  ?deprecation:Deprecation.t -> ('r, Geninterp.TaggedVal.t Ftactic.t) ml_ty_sig -> 'r -> unit
 (** Same as {!ml_tactic_extend} but the function can return an argument
     instead. *)
 
@@ -112,7 +112,7 @@ val tactic_extend : string -> string -> level:Int.t ->
 
 val eval_of_ty_ml :
   ty_ml ->
-  Geninterp.Val.t list ->
+  Geninterp.NamedVal.t list ->
   Geninterp.interp_sign ->
   unit Proofview.tactic
 
@@ -161,7 +161,7 @@ type 'b argument_subst =
 
 type ('b, 'c) argument_interp =
 | ArgInterpRet : ('c, 'c) argument_interp
-| ArgInterpFun : ('b, Geninterp.Val.t) Geninterp.interp_fun -> ('b, 'c) argument_interp
+| ArgInterpFun : ('b, Geninterp.TaggedVal.t) Geninterp.interp_fun -> ('b, 'c) argument_interp
 | ArgInterpWit : ('a, 'b, 'r) Genarg.genarg_type -> ('b, 'c) argument_interp
 | ArgInterpSimple :
   (Geninterp.interp_sign -> Environ.env -> Evd.evar_map -> 'b -> 'c) -> ('b, 'c) argument_interp

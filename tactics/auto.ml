@@ -118,7 +118,9 @@ let conclPattern concl pat tac =
      | Val.Base tag -> Val.Dyn (tag, c)
      | _ -> assert false
      in
-     let fold id c accu = Id.Map.add id (inj c) accu in
+     let fold id c accu =
+       (* FIXME: this is same as [Taccoerce.NamedValue.of_constr] *)
+       Id.Map.add id (NamedVal.make ~msg:(fun () -> Printer.pr_econstr_env env sigma c) (inj c)) accu in
      let lfun = Id.Map.fold fold constr_bindings Id.Map.empty in
      let ist = { lfun
                ; poly

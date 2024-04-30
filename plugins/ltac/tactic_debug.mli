@@ -30,7 +30,7 @@ type debug_info =
 (** Prints the state and waits *)
 val debug_prompt :
   int -> glob_tactic_expr -> (debug_info -> 'a Proofview.tactic) ->
-  Geninterp.Val.t Id.Map.t -> Tacexpr.ltac_trace option -> 'a Proofview.tactic
+  Geninterp.NamedVal.t Id.Map.t -> Tacexpr.ltac_trace option -> 'a Proofview.tactic
 
 (** Initializes debugger *)
 val db_initialize : bool -> unit Proofview.NonLogical.t

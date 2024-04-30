@@ -54,7 +54,7 @@ type tauto_flags = {
 let tag_tauto_flags : tauto_flags Val.typ = Val.create "tauto_flags"
 
 let assoc_flags ist : tauto_flags =
-  let Val.Dyn (tag, v) = Id.Map.find (Names.Id.of_string "tauto_flags") ist.lfun in
+  let Val.Dyn (tag, v) = (Id.Map.find (Names.Id.of_string "tauto_flags") ist.lfun).Proofview.Named.v in
   match Val.eq tag tag_tauto_flags with
   | None -> assert false
   | Some Refl -> v
@@ -222,7 +222,10 @@ let with_flags flags _ ist =
   let f = CAst.make @@ Id.of_string "f" in
   let x = CAst.make @@ Id.of_string "x" in
   let arg = Val.Dyn (tag_tauto_flags, flags) in
-  let ist = { ist with lfun = Id.Map.add x.CAst.v arg ist.lfun } in
+  let ist = {
+    ist with
+    lfun = Id.Map.add x.CAst.v (NamedVal.make ~msg:(fun () -> Pp.str "<tauto flags>") arg) ist.lfun;
+  } in
   eval_tactic_ist ist (CAst.make @@ TacArg (TacCall (CAst.make (Locus.ArgVar f, [Reference (Locus.ArgVar x)]))))
 
 let warn_auto_with_star = CWarnings.create ~name:"intuition-auto-with-star" ~category:Deprecation.Version.v8_17
@@ -240,12 +243,15 @@ let warn_auto_with_star_tac _ _ =
 
 let val_of_id id =
   let open Geninterp in
-  let id = CAst.make @@ Tactypes.IntroNaming (IntroIdentifier id) in
-  Val.inject (val_tag @@ Genarg.topwit Tacarg.wit_intro_pattern) id
+  let id' = CAst.make @@ Tactypes.IntroNaming (IntroIdentifier id) in
+  NamedVal.make
+    ~msg:(fun () -> Id.print id)
+    (Val.inject (val_tag @@ Genarg.topwit Tacarg.wit_intro_pattern) id')
 
 let find_cut _ ist =
   let k = Id.Map.find (Names.Id.of_string "k") ist.lfun in
   Proofview.Goal.enter begin fun gl ->
+  let env = Proofview.Goal.env gl in
   let sigma = Proofview.Goal.sigma gl in
   let hyps0 = Proofview.Goal.hyps gl in
   (* Beware of the relative order of hypothesis picking! *)
@@ -271,7 +277,7 @@ let find_cut _ ist =
   in
   let tac =
     find_arg hyps0 >>= fun (f, arg, t) ->
-    Tacinterp.Value.apply k [val_of_id f; val_of_id arg; Value.of_constr t]
+    Tacinterp.Value.apply k [val_of_id f; val_of_id arg; Value.of_constr env sigma t]
   in
   Proofview.tclONCE tac
   end

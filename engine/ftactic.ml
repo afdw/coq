@@ -14,7 +14,7 @@ open Proofview.Notations
 
 type 'a focus =
 | Uniform of 'a
-| Depends of 'a list
+| Depends of ('a * Proofview_monad.Info.deferred_id) list
 
 (** Type of tactics potentially goal-dependent. If it contains a [Depends],
     then the length of the inner list is guaranteed to be the number of
@@ -27,13 +27,18 @@ let return (x : 'a) : 'a t = Proofview.tclUNIT (Uniform x)
 let bind (type a) (type b) (m : a t) (f : a -> b t) : b t = m >>= function
 | Uniform x -> f x
 | Depends l ->
-  let f arg = f arg >>= function
+  let f (arg, deferred_id) =
+  Proofview.Trace.tag_deferred_contents deferred_id (f arg) >>= function
   | Uniform x ->
     (* We dispatch the uniform result on each goal under focus, as we know
        that the [m] argument was actually dependent. *)
     Proofview.Goal.goals >>= fun goals ->
-    let ans = List.map (fun g -> (g,x)) goals in
-    Proofview.tclUNIT ans
+    (match goals with
+    | [] -> Proofview.tclUNIT []
+    | _ ->
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      let ans = List.map (fun g -> (g, (x, deferred_id))) goals in
+      Proofview.tclUNIT ans)
   | Depends l ->
     Proofview.Goal.goals >>= fun goals ->
     Proofview.tclUNIT (List.combine goals l)
@@ -44,17 +49,28 @@ let bind (type a) (type b) (m : a t) (f : a -> b t) : b t = m >>= function
      result would not have the same length as the list of focused
      goals, which is an invariant of the [Ftactic] module. It is the
      reason why a goal is attached to each result above. *)
-  let filter (g,x) =
+  let filter (g, (x, deferred_id)) =
     g >>= fun g ->
     Proofview.Goal.unsolved g >>= function
-    | true -> Proofview.tclUNIT (Some x)
-    | false -> Proofview.tclUNIT None
+    | true -> Proofview.tclUNIT (Some (x, deferred_id))
+    | false ->
+      Proofview.Trace.tag_deferred_contents deferred_id (Proofview.tclUNIT None)
   in
   Proofview.tclDISPATCHL (List.map f l) >>= fun l ->
   Proofview.Monad.List.map_filter filter (List.concat l) >>= fun filtered ->
   Proofview.tclUNIT (Depends filtered)
 
-let goals = Proofview.Goal.goals >>= fun l -> Proofview.tclUNIT (Depends l)
+let goals =
+  Proofview.Goal.goals >>= fun l ->
+  Proofview.Trace.tag_dispatch (fun ~tag_branch ->
+    l |> Proofview.Monad.List.map (fun goal ->
+      tag_branch.wrap (
+        Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        Proofview.tclUNIT (goal, deferred_id)
+      )
+    )
+  ) >>= fun l ->
+  Proofview.tclUNIT (Depends l)
 
 let enter f =
   bind goals
@@ -67,7 +83,9 @@ let with_env t =
     | Depends l ->
         Proofview.Goal.goals >>= fun gs ->
         Proofview.Monad.(List.map (map Proofview.Goal.env) gs) >>= fun envs ->
-        Proofview.tclUNIT (Depends (List.combine envs l))
+        Proofview.tclUNIT (Depends (
+          List.combine envs l |> List.map (fun (env, (x, deferred_id)) -> ((env, x), deferred_id))
+        ))
 
 let lift (type a) (t:a Proofview.tactic) : a t =
   Proofview.tclBIND t (fun x -> Proofview.tclUNIT (Uniform x))
@@ -76,7 +94,9 @@ let lift (type a) (t:a Proofview.tactic) : a t =
 let run m k = m >>= function
 | Uniform v -> k v
 | Depends l ->
-  let tacs = List.map k l in
+  let tacs = l |> List.map (fun (x, deferred_id) ->
+    Proofview.Trace.tag_deferred_contents deferred_id (k x)
+  ) in
   Proofview.tclDISPATCH tacs
 
 let (>>=) = bind

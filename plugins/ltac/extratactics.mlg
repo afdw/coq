@@ -642,7 +642,7 @@ ARGUMENT EXTEND comparison PRINTED BY { pr_cmp' }
 
 let interp_test ist env sigma = function
   | Test (c,x,y) ->
-      Test(c,Tacinterp.interp_int_or_var ist x,Tacinterp.interp_int_or_var ist y)
+      Test(c,(Tacinterp.interp_int_or_var ist x).Proofview.Named.v,(Tacinterp.interp_int_or_var ist y).Proofview.Named.v)
 
 }
 
@@ -714,4 +714,8 @@ TACTIC EXTEND with_strategy
 | [ "with_strategy" strategy_level_or_var(v) "[" ne_smart_global_list(q) "]" tactic3(tac) ] -> {
   with_set_strategy [(v, q)] (Tacinterp.tactic_of_value ist tac)
 }
+END
+
+TACTIC EXTEND test
+| [ "test" ] -> { Internals.tclTEST }
 END

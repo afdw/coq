@@ -286,7 +286,7 @@ open Geninterp
 let val_env : environment Val.typ = Val.create "ltac2:env"
 let env_ref = Id.of_string_soft "@@ltac2_env@@"
 
-let extract_env (Val.Dyn (tag, v)) : environment =
+let extract_env {Proofview.Named.v = (Val.Dyn (tag, v))} : environment =
 match Val.eq tag val_env with
 | None -> assert false
 | Some Refl -> v
@@ -296,4 +296,4 @@ let get_env ist =
   with Not_found -> empty_environment
 
 let set_env env ist =
-  Id.Map.add env_ref (Val.Dyn (val_env, env)) ist
+  Id.Map.add env_ref (NamedVal.make (Val.Dyn (val_env, env))) ist

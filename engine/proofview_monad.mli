@@ -48,15 +48,30 @@ end
 module Info : sig
   open TraceBuilder
 
+  type deferred_id
+
+  val new_deferred_id : unit -> deferred_id
+
   (** We typically label nodes of the trace with messages to
       print. But we don't want to compute the result. *)
   type lazy_msg = unit -> Pp.t
 
+  type tactic_kind =
+  | Primitive of Pp.t
+  | Builtin of Pp.t
+  | Alias of Pp.t
+  | ML of Pp.t
+  [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+
+  type tactic_info = tactic_kind * lazy_msg
+
   (** The type of the tags for [Info]. *)
   type tag =
-    | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND] or [Proofview.Goal.enter]. *)
+    | TagDeferredContents of deferred_id
+    | TagDeferredPlaceholder of deferred_id
+    | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
     | TagDispatchBranch (** A marker to delimit an individual branch of [TagDispatch]. *)
-    | TagTactic of lazy_msg (** A tactic call. *)
+    | TagTactic of tactic_info (** A tactic call. *)
     | TagMessage of lazy_msg (** A message by [TacId]. *)
 
   type state = tag incr
@@ -64,8 +79,8 @@ module Info : sig
 
   type trace =
     | Sequence of trace list (** A sequence. *)
-    | Dispatch of trace list (** A call to [tclDISPATCHGEN], [tclEXTEND] or [Proofview.Goal.enter]. *)
-    | Tactic of lazy_msg * trace (** A tactic call, with its execution detailed. *)
+    | Dispatch of trace list (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
+    | Tactic of tactic_info * trace (** A tactic call, with its execution detailed. *)
     | Message of lazy_msg (** A message by [TacId]. *)
 
   val finish : pretrace -> trace
@@ -84,7 +99,7 @@ module Event : sig
   type 'a t =
     | Sequence of {elements : 'a t list}
     | Dispatch of {branches : 'a t list}
-    | Tactic of {tactic : 'a; details : 'a t}
+    | Tactic of {kind : Info.tactic_kind; tactic : 'a; details : 'a t}
     | Message of {message : string}
     [@@deriving yojson { variants = `Internal "type" }]
 

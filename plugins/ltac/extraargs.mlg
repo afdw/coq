@@ -102,7 +102,7 @@ let occurrences_of = function
         CErrors.user_err Pp.(str "Illegal negative occurrence number.");
       OnlyOccurrences nl
 
-let coerce_to_int v = match Value.to_int v with
+let coerce_to_int v = match Taccoerce.Value.to_int v with
   | None -> raise (CannotCoerceTo "an integer")
   | Some n -> n
 
@@ -115,7 +115,7 @@ let interp_occs ist env sigma l =
     | ArgArg x -> x
     | ArgVar ({ CAst.v = id } as locid) ->
         (try int_list_of_VList (Id.Map.find id ist.lfun)
-          with Not_found | CannotCoerceTo _ -> [interp_int ist locid])
+          with Not_found | CannotCoerceTo _ -> [(interp_int ist locid).Proofview.Named.v])
 
 let glob_occs ist l = l
 
@@ -219,7 +219,7 @@ let intern_place ist = function
 
 let interp_place ist env sigma = function
 | None -> None
-| Some (id, hl) -> Some (Tacinterp.interp_hyp ist env sigma id, hl)
+| Some (id, hl) -> Some ((Tacinterp.interp_hyp ist env sigma id).Proofview.Named.v, hl)
 
 let subst_place subst pl = pl
 
@@ -341,7 +341,7 @@ let interp_strategy ist env sigma = function
   in
   let v =
     try Tacinterp.Value.cast (Genarg.topwit wit_strategy_level) v
-    with CErrors.UserError _ -> Taccoerce.error_ltac_variable ?loc id None v "a strategy_level"
+    with CErrors.UserError _ -> Taccoerce.error_ltac_variable ?loc id None v.Proofview.Named.v "a strategy_level"
   in
   v
 

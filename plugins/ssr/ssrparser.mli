@@ -44,15 +44,15 @@ val wit_ssrclauses : clauses Genarg.uniform_genarg_type
 val wit_ssrhavefwdwbinders :
   (Tacexpr.raw_tactic_expr fwdbinders,
    Tacexpr.glob_tactic_expr fwdbinders,
-   Tacinterp.Value.t fwdbinders) Genarg.genarg_type
+   Geninterp.Val.t fwdbinders) Genarg.genarg_type
 val wit_ssrhintarg :
   (Tacexpr.raw_tactic_expr ssrhint,
    Tacexpr.glob_tactic_expr ssrhint,
-   Tacinterp.Value.t ssrhint) Genarg.genarg_type
+   Geninterp.Val.t ssrhint) Genarg.genarg_type
 val wit_ssrhint3arg :
   (Tacexpr.raw_tactic_expr ssrhint,
    Tacexpr.glob_tactic_expr ssrhint,
-   Tacinterp.Value.t ssrhint) Genarg.genarg_type
+   Geninterp.Val.t ssrhint) Genarg.genarg_type
 
 val wit_ssrfwdid : Names.Id.t Genarg.uniform_genarg_type
 
@@ -62,12 +62,12 @@ val wit_ssrsetfwd :
 val wit_ssrdoarg :
   (Tacexpr.raw_tactic_expr ssrdoarg,
    Tacexpr.glob_tactic_expr ssrdoarg,
-   Tacinterp.Value.t ssrdoarg) Genarg.genarg_type
+   Geninterp.Val.t ssrdoarg) Genarg.genarg_type
 
 val wit_ssrhint :
   (Tacexpr.raw_tactic_expr ssrhint,
    Tacexpr.glob_tactic_expr ssrhint,
-   Tacinterp.Value.t ssrhint) Genarg.genarg_type
+   Geninterp.Val.t ssrhint) Genarg.genarg_type
 
 val ssrhpats : ssrhpats Pcoq.Entry.t
 val wit_ssrhpats : ssrhpats Genarg.uniform_genarg_type

@@ -93,7 +93,7 @@ type debugger_state = {
   (* yields the call stack *)
   mutable stack : (string * Loc.t option) list;
   (* variable value maps for each stack frame *)
-  mutable varmaps : Geninterp.Val.t Names.Id.Map.t list;
+  mutable varmaps : Geninterp.NamedVal.t Names.Id.Map.t list;
 }
 
 let debugger_state = { cur_loc=None; stack=[]; varmaps=[] }
@@ -207,7 +207,7 @@ let get_vars framenum =
     let pr_v =
       let env = Global.env () in
       let sigma = Evd.from_env env in
-      Pptactic.pr_value ~context:(env, sigma) Constrexpr.LevelSome v in
+      Pptactic.pr_value ~context:(env, sigma) Constrexpr.LevelSome v.Proofview.Named.v in
     (Id.to_string id, pr_v)
   ) (Id.Map.bindings vars)
 

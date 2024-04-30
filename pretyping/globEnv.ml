@@ -165,7 +165,7 @@ let interp_ltac_variable ?loc typing_fun env sigma id : Evd.evar_map * unsafe_ju
   (* Check if [id] is a ltac variable not bound to a term *)
   (* and build a nice error message *)
   if Id.Map.mem id env.lvar.ltac_genargs then begin
-    let Geninterp.Val.Dyn (typ, _) = Id.Map.find id env.lvar.ltac_genargs in
+    let Geninterp.Val.Dyn (typ, _) = (Id.Map.find id env.lvar.ltac_genargs).Proofview.Named.v in
     user_err ?loc
      (str "Variable " ++ Id.print id ++ str " should be bound to a term but is \
       bound to a " ++ Geninterp.Val.pr typ ++ str ".")

@@ -64,15 +64,34 @@ end
 module Info = struct
   open TraceBuilder
 
+  type deferred_id = int
+
+  let deferred_id_ctr = ref 0
+
   (** We typically label nodes of the trace with messages to
       print. But we don't want to compute the result. *)
   type lazy_msg = unit -> Pp.t
 
+  let new_deferred_id () = incr deferred_id_ctr; !deferred_id_ctr
+
+  module DeferredIdMap = Map.Make(Int)
+
+  type tactic_kind =
+    | Primitive of Pp.t
+    | Builtin of Pp.t
+    | Alias of Pp.t
+    | ML of Pp.t
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+
+  type tactic_info = tactic_kind * lazy_msg
+
   (** The type of the tags for [Info]. *)
   type tag =
-    | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND] or [Proofview.Goal.enter]. *)
+    | TagDeferredContents of deferred_id
+    | TagDeferredPlaceholder of deferred_id
+    | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
     | TagDispatchBranch (** A marker to delimit an individual branch of [TagDispatch]. *)
-    | TagTactic of lazy_msg (** A tactic call. *)
+    | TagTactic of tactic_info (** A tactic call. *)
     | TagMessage of lazy_msg (** A message by [TacId]. *)
 
   type state = tag incr
@@ -80,23 +99,66 @@ module Info = struct
 
   type trace =
     | Sequence of trace list (** A sequence. *)
-    | Dispatch of trace list (** A call to [tclDISPATCHGEN], [tclEXTEND] or [Proofview.Goal.enter]. *)
-    | Tactic of lazy_msg * trace (** A tactic call, with its execution detailed. *)
+    | Dispatch of trace list (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
+    | Tactic of tactic_info * trace (** A tactic call, with its execution detailed. *)
     | Message of lazy_msg (** A message by [TacId]. *)
 
-  let rec finish_tree = function
-    | Node (TagDispatch, brs) ->
+  let rec collect_deferred_tree deferred_map = function
+    | Node (TagDeferredContents deferred_id, f) ->
+      (* assert (not (deferred_map |> DeferredIdMap.mem deferred_id)); *)
+      let deferred_map, f = collect_deferred_forest deferred_map f in
+      deferred_map |> DeferredIdMap.add deferred_id f, None
+    | Node (tag, f) ->
+      let deferred_map, f = collect_deferred_forest deferred_map f in
+      deferred_map, Some (Node (tag, f))
+  and collect_deferred_forest deferred_map f =
+    List.fold_right (fun t (deferred_map, f) ->
+      let deferred_map, t = collect_deferred_tree deferred_map t in
+      deferred_map, (t |> Option.to_list) @ f
+    ) f (deferred_map, [])
+
+  let rec substitute_deferred_tree deferred_map = function
+    | Node (TagDeferredContents _, _) -> assert false
+    | Node (TagDeferredPlaceholder deferred_id, []) ->
+      (* deferred_map
+        |> DeferredIdMap.find deferred_id
+        |> substitute_deferred_forest deferred_map *)
+      (* deferred_map
+        |> DeferredIdMap.find_opt deferred_id
+        |> Option.map (substitute_deferred_forest deferred_map)
+        |> Option.default [] *)
+      deferred_map
+        |> DeferredIdMap.find_opt deferred_id
+        |> Option.map (substitute_deferred_forest deferred_map)
+        |> Option.default [Node (TagTactic (Primitive (Pp.str "<error>"), fun () -> Pp.(str "No contents for deferred_id " ++ int deferred_id)), [])]
+    | Node (TagDeferredPlaceholder _, _) ->
+      assert false
+    | Node (tag, f) ->
+      [Node (tag, f |> substitute_deferred_forest deferred_map)]
+  and substitute_deferred_forest deferred_map f =
+    f |> List.map (substitute_deferred_tree deferred_map) |> List.flatten
+
+  let rec convert_tree = function
+    | Node (TagDeferredContents _, _) -> assert false
+    | Node (TagDeferredPlaceholder _, _) -> assert false
+    | Node (TagDispatch, f) ->
       Dispatch (
-        brs |> List.map (function
-          | Node (TagDispatchBranch, f) -> finish f
+        f |> List.map (function
+          | Node (TagDispatchBranch, f) -> convert_forest f
           | _ -> assert false
         )
       )
     | Node (TagDispatchBranch, _) -> assert false
-    | Node (TagTactic m, f) -> Tactic (m, finish f)
+    | Node (TagTactic info, f) -> Tactic (info, convert_forest f)
     | Node (TagMessage m, []) -> Message m
     | Node (TagMessage _, _) -> assert false
-  and finish f = Sequence (f |> List.map finish_tree)
+  and convert_forest f = Sequence (f |> List.map convert_tree)
+
+  let finish f =
+    let deferred_map = DeferredIdMap.empty in
+    let deferred_map, f = collect_deferred_forest deferred_map f in
+    let f = substitute_deferred_forest deferred_map f in
+    convert_forest f
 
   let rec compress = function
     | Sequence brs ->
@@ -117,7 +179,7 @@ module Info = struct
       let brs = brs |> List.map compress in
       let all_empty = brs |> List.for_all (fun e -> match e with Sequence [] -> true | _ -> false) in
       if all_empty then Sequence [] else Dispatch brs
-    | Tactic (m, c) -> Tactic (m, compress c)
+    | Tactic (info, c) -> Tactic (info, compress c)
     | Message m -> Message m
 
   let rec print = let open Pp in function
@@ -131,13 +193,13 @@ module Info = struct
       if brs = []
       then str "idtac"
       else str "[>" ++ spc () ++ (brs |> Pp.prlist_with_sep sep print) ++ spc () ++ str "]"
-    | Tactic (m, _) -> m ()
+    | Tactic ((kind, msg), _) -> msg ()
     | Message m -> str "(* " ++ m () ++ str " *)"
 
   let rec collapse n = function
     | Sequence brs -> Sequence (brs |> List.map (collapse n))
     | Dispatch brs -> Dispatch (brs |> List.map (collapse n))
-    | Tactic (m, c) -> if n > 0 then collapse (n - 1) c else Tactic (m, Sequence [])
+    | Tactic (info, c) -> if n > 0 then collapse (n - 1) c else Tactic (info, Sequence [])
     | Message m -> Message m
 end
 
@@ -145,14 +207,14 @@ module Event = struct
   type 'a t =
     | Sequence of {elements : 'a t list}
     | Dispatch of {branches : 'a t list}
-    | Tactic of {tactic : 'a; details : 'a t}
+    | Tactic of {kind : Info.tactic_kind; tactic : 'a; details : 'a t}
     | Message of {message : string}
     [@@deriving yojson { variants = `Internal "type" }]
 
   let rec of_trace f = function
     | Info.Sequence brs -> Sequence {elements = brs |> List.map (of_trace f)}
     | Info.Dispatch brs -> Dispatch {branches = brs |> List.map (of_trace f)}
-    | Info.Tactic (m, c) -> Tactic {tactic = f m; details = of_trace f c}
+    | Info.Tactic ((kind, msg), c) -> Tactic {kind = kind; tactic = f msg; details = of_trace f c}
     | Info.Message m -> Message {message = m () |> Pp.simple_string_of_ppcmds}
 end
 

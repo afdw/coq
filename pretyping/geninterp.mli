@@ -58,18 +58,31 @@ val register_val0 : ('raw, 'glb, 'top) genarg_type -> 'top Val.tag option -> uni
     argument, a new fresh tag with the same name as the argument is associated
     to the generic type. *)
 
+module TaggedVal : sig
+  type t = Val.t Proofview.Tagged.t
+
+  val make : ?tags:Proofview_monad.Info.tag list Proofview.tactic -> Val.t -> t
+  val append : Proofview_monad.Info.tag list Proofview.tactic -> t -> t
+end
+
+module NamedVal : sig
+  type t = Val.t Proofview.Named.t
+
+  val make : ?msg:Proofview_monad.Info.lazy_msg -> Val.t -> t
+end
+
 (** {6 Interpretation functions} *)
 
 module TacStore : Store.S
 
 type interp_sign =
-  { lfun : Val.t Id.Map.t
+  { lfun : NamedVal.t Id.Map.t
   ; poly : bool
   ; extra : TacStore.t }
 
 type ('glb, 'top) interp_fun = interp_sign -> 'glb -> 'top Ftactic.t
 
-val interp : ('raw, 'glb, 'top) genarg_type -> ('glb, Val.t) interp_fun
+val interp : ('raw, 'glb, 'top) genarg_type -> ('glb, TaggedVal.t) interp_fun
 
 val register_interp0 :
-  ('raw, 'glb, 'top) genarg_type -> ('glb, Val.t) interp_fun -> unit
+  ('raw, 'glb, 'top) genarg_type -> ('glb, TaggedVal.t) interp_fun -> unit

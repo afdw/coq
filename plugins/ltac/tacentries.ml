@@ -659,7 +659,7 @@ let rec clause_of_sign : type a. int -> a ty_sig -> Genarg.ArgT.any Extend.user_
 let clause_of_ty_ml = function
   | TyML (t,_) -> clause_of_sign 1 t
 
-let rec eval_sign : type a. a ty_sig -> a -> Geninterp.Val.t list -> Geninterp.interp_sign -> unit Proofview.tactic =
+let rec eval_sign : type a. a ty_sig -> a -> Geninterp.NamedVal.t list -> Geninterp.interp_sign -> unit Proofview.tactic =
   fun sign tac ->
     match sign with
     | TyNil ->
@@ -673,11 +673,11 @@ let rec eval_sign : type a. a ty_sig -> a -> Geninterp.Val.t list -> Geninterp.i
       begin fun tac vals ist -> match vals with
       | [] -> assert false
       | v :: vals ->
-        let v' = Taccoerce.Value.cast (topwit (Egramml.proj_symbol a)) v in
+        let v' = Taccoerce.Value.cast (topwit (Egramml.proj_symbol a)) v.Proofview.Named.v in
         f (tac v') vals ist
       end tac
 
-let eval : ty_ml -> Geninterp.Val.t list -> Geninterp.interp_sign -> unit Proofview.tactic = function
+let eval : ty_ml -> Geninterp.NamedVal.t list -> Geninterp.interp_sign -> unit Proofview.tactic = function
   | TyML (t,tac) -> eval_sign t tac
 let eval_of_ty_ml = eval
 
@@ -705,9 +705,9 @@ let lift_constr_tac_to_ml_tac vars tac =
     | Anonymous -> None
     | Name id ->
       let c = Id.Map.find id ist.Geninterp.lfun in
-      try Some (Taccoerce.Value.of_constr @@ Taccoerce.coerce_to_closed_constr env c)
+      try Some {c with Proofview.Named.v = Taccoerce.Value.of_constr @@ Taccoerce.coerce_to_closed_constr env c.Proofview.Named.v}
       with Taccoerce.CannotCoerceTo ty ->
-        Taccoerce.error_ltac_variable dummy_id (Some (env,sigma)) c ty
+        Taccoerce.error_ltac_variable dummy_id (Some (env,sigma)) c.Proofview.Named.v ty
     in
     let args = List.map_filter map vars in
     tac args ist
@@ -750,13 +750,13 @@ let tactic_extend plugin_name tacname ~level ?deprecation sign =
 
 type (_, 'a) ml_ty_sig =
 | MLTyNil : ('a, 'a) ml_ty_sig
-| MLTyArg : ('r, 'a) ml_ty_sig -> (Geninterp.Val.t -> 'r, 'a) ml_ty_sig
+| MLTyArg : ('r, 'a) ml_ty_sig -> (Geninterp.NamedVal.t -> 'r, 'a) ml_ty_sig
 
 let rec ml_sig_len : type r a. (r, a) ml_ty_sig -> int = function
 | MLTyNil -> 0
 | MLTyArg sign -> 1 + ml_sig_len sign
 
-let rec cast_ml : type r a. (r, a) ml_ty_sig -> r -> Geninterp.Val.t list -> a =
+let rec cast_ml : type r a. (r, a) ml_ty_sig -> r -> Geninterp.NamedVal.t list -> a =
   fun sign f ->
   match sign with
   | MLTyNil ->
@@ -796,7 +796,7 @@ end
 
 module MLTacMap = Map.Make(MLName)
 
-let ml_table : (Geninterp.Val.t list -> Geninterp.Val.t Ftactic.t) MLTacMap.t ref = ref MLTacMap.empty
+let ml_table : (Geninterp.NamedVal.t list -> Geninterp.TaggedVal.t Ftactic.t) MLTacMap.t ref = ref MLTacMap.empty
 
 type ml_ltac_val = {
   tacval_tac : Tacexpr.ml_tactic_name;
@@ -820,7 +820,7 @@ let in_tacval =
     make it here generic. The argument should not be used for other purposes, so
     we only export the registering functions.
   *)
-  let wit : (Empty.t, ml_ltac_val, Geninterp.Val.t) Genarg.genarg_type =
+  let wit : (Empty.t, ml_ltac_val, Geninterp.TaggedVal.t) Genarg.genarg_type =
     Genarg.create_arg "ltac:val"
   in
   (* No need to internalize this ever *)
@@ -873,7 +873,7 @@ type 'b argument_subst =
 
 type ('b, 'c) argument_interp =
 | ArgInterpRet : ('c, 'c) argument_interp
-| ArgInterpFun : ('b, Val.t) interp_fun -> ('b, 'c) argument_interp
+| ArgInterpFun : ('b, Geninterp.TaggedVal.t) interp_fun -> ('b, 'c) argument_interp
 | ArgInterpWit : ('a, 'b, 'r) Genarg.genarg_type -> ('b, 'c) argument_interp
 | ArgInterpSimple :
   (Geninterp.interp_sign -> Environ.env -> Evd.evar_map -> 'b -> 'c) -> ('b, 'c) argument_interp
@@ -903,9 +903,9 @@ match arg.arg_subst with
     let ans = Genarg.out_gen (glbwit wit) (Tacsubst.subst_genarg s (Genarg.in_gen (glbwit wit) v)) in
     ans
 
-let interp_fun (type a b c) name (arg : (a, b, c) tactic_argument) (tag : c Val.tag) : (b, Val.t) interp_fun =
+let interp_fun (type a b c) name (arg : (a, b, c) tactic_argument) (tag : c Val.tag) : (b, Geninterp.TaggedVal.t) interp_fun =
 match arg.arg_interp with
-| ArgInterpRet -> (fun ist v -> Ftactic.return (Geninterp.Val.inject tag v))
+| ArgInterpRet -> (fun ist v -> Ftactic.return (TaggedVal.make (Geninterp.Val.inject tag v)))
 | ArgInterpFun f -> f
 | ArgInterpWit wit ->
   (fun ist x -> Tacinterp.interp_genarg ist (Genarg.in_gen (glbwit wit) x))
@@ -914,7 +914,7 @@ match arg.arg_interp with
     let env = Proofview.Goal.env gl in
     let sigma = Proofview.Goal.sigma gl in
     let v = f ist env sigma v in
-    Ftactic.return (Geninterp.Val.inject tag v)
+    Ftactic.return (TaggedVal.make (Geninterp.Val.inject tag v))
   end)
 
 let argument_extend (type a b c) ~plugin ~name (arg : (a, b, c) tactic_argument) =

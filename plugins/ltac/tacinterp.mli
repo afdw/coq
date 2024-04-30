@@ -20,20 +20,17 @@ val ltac_trace_info : ltac_stack Exninfo.t
 
 module Value :
 sig
-  type t = Geninterp.Val.t
-  val of_constr : constr -> t
+  type t = Geninterp.NamedVal.t
+  val of_constr : Environ.env -> Evd.evar_map -> constr -> t
   val to_constr : t -> constr option
   val of_int : int -> t
   val to_int : t -> int option
-  val to_list : t -> t list option
-  val of_closure : Geninterp.interp_sign -> glob_tactic_expr -> t
-  val cast : 'a typed_abstract_argument_type -> Geninterp.Val.t -> 'a
+  val to_list : t -> Geninterp.Val.t list option
+  val of_closure : Geninterp.interp_sign -> glob_tactic_expr -> Geninterp.Val.t
+  val cast : 'a typed_abstract_argument_type -> t -> 'a
   val apply : t -> t list -> unit Proofview.tactic
   val apply_val : t -> t list -> t Ftactic.t
 end
-
-(** Values for interpretation *)
-type value = Value.t
 
 module TacStore : Store.S with
   type t = Geninterp.TacStore.t
@@ -41,7 +38,7 @@ module TacStore : Store.S with
 
 (** Signature for interpretation: val\_interp and interpretation functions *)
 type interp_sign = Geninterp.interp_sign =
-  { lfun : value Id.Map.t
+  { lfun : Geninterp.NamedVal.t Id.Map.t
   ; poly : bool
   ; extra : TacStore.t }
 
@@ -68,13 +65,13 @@ val type_uconstr :
 
 (** Adds an interpretation function for extra generic arguments *)
 
-val interp_genarg : interp_sign -> glob_generic_argument -> Value.t Ftactic.t
+val interp_genarg : interp_sign -> glob_generic_argument -> Geninterp.TaggedVal.t Ftactic.t
 
 (** Interprets any expression *)
-val val_interp : interp_sign -> glob_tactic_expr -> (value -> unit Proofview.tactic) -> unit Proofview.tactic
+val val_interp : interp_sign -> glob_tactic_expr -> (Geninterp.TaggedVal.t -> unit Proofview.tactic) -> unit Proofview.tactic
 
 (** Interprets an expression that evaluates to a constr *)
-val interp_ltac_constr : interp_sign -> glob_tactic_expr -> (constr -> unit Proofview.tactic) -> unit Proofview.tactic
+val interp_ltac_constr : interp_sign -> glob_tactic_expr -> (constr Proofview.Tagged.t -> unit Proofview.tactic) -> unit Proofview.tactic
 
 (** Interprets redexp arguments *)
 val interp_red_expr : interp_sign -> Environ.env -> Evd.evar_map -> Genredexpr.glob_red_expr -> Evd.evar_map * red_expr
@@ -87,7 +84,7 @@ val interp_strategy : interp_sign -> Environ.env -> Evd.evar_map -> glob_strateg
 (** Interprets tactic expressions *)
 
 val interp_hyp : interp_sign -> Environ.env -> Evd.evar_map ->
-  lident -> Id.t
+  lident -> Id.t Proofview.Named.t
 
 val interp_glob_closure : interp_sign -> Environ.env -> Evd.evar_map ->
   ?kind:Pretyping.typing_constraint -> ?pattern_mode:bool -> glob_constr_and_expr ->
@@ -121,11 +118,11 @@ val eval_tactic : glob_tactic_expr -> unit Proofview.tactic
 val eval_tactic_ist : interp_sign -> glob_tactic_expr -> unit Proofview.tactic
 (** Same as [eval_tactic], but with the provided [interp_sign]. *)
 
-val tactic_of_value : interp_sign -> Value.t -> unit Proofview.tactic
+val tactic_of_value : interp_sign -> Geninterp.Val.t -> unit Proofview.tactic
 
 (** Globalization + interpretation *)
 
-val interp_tac_gen : value Id.Map.t -> Id.Set.t ->
+val interp_tac_gen : Geninterp.NamedVal.t Id.Map.t -> Id.Set.t ->
                  debug_info -> raw_tactic_expr -> unit Proofview.tactic
 
 val interp : raw_tactic_expr -> unit Proofview.tactic
@@ -140,14 +137,14 @@ val hide_interp : ltac_expr -> ComTactic.interpretable
 
 (** Internals that can be useful for syntax extensions. *)
 
-val interp_ltac_var : (value -> 'a) -> interp_sign ->
-  (Environ.env * Evd.evar_map) option -> lident -> 'a
+val interp_ltac_var : (Geninterp.Val.t -> 'a) -> interp_sign ->
+  (Environ.env * Evd.evar_map) option -> lident -> 'a Proofview.Named.t
 
-val interp_int : interp_sign -> lident -> int
+val interp_int : interp_sign -> lident -> int Proofview.Named.t
 
-val interp_int_or_var : interp_sign -> int Locus.or_var -> int
+val interp_int_or_var : interp_sign -> int Locus.or_var -> int Proofview.Named.t
 
-val interp_ident : interp_sign -> Environ.env -> Evd.evar_map -> Id.t -> Id.t
+val interp_ident : interp_sign -> Environ.env -> Evd.evar_map -> Id.t -> Id.t Proofview.Named.t
 
 val interp_intro_pattern : interp_sign -> Environ.env -> Evd.evar_map ->
   glob_constr_and_expr intro_pattern_expr CAst.t -> intro_pattern

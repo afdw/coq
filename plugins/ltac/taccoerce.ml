@@ -19,6 +19,7 @@ open Stdarg
 open Tacarg
 open Geninterp
 open Pp
+open Proofview.Notations
 
 exception CannotCoerceTo of string
 
@@ -138,6 +139,27 @@ let rec tag_of_arg : type a b c. (a, b, c) genarg_type -> c Val.tag = fun wit ->
 let val_cast arg v = prj (tag_of_arg arg) v
 
 let cast (Topwit wit) v = val_cast wit v
+
+end
+
+module NamedValue =
+struct
+
+type t = NamedVal.t
+
+let of_constr env sigma c =
+  NamedVal.make ~msg:(fun () -> Printer.pr_econstr_env env sigma c) (Value.of_constr c)
+
+let to_constr v = Value.to_constr v.Proofview.Named.v
+
+let of_int i =
+  NamedVal.make ~msg:(fun () -> Pp.int i) (Value.of_int i)
+
+let to_int v = Value.to_int v.Proofview.Named.v
+
+let to_list v = Value.to_list v.Proofview.Named.v
+
+let cast t v = Value.cast t v.Proofview.Named.v
 
 end
 
@@ -400,7 +422,7 @@ let coerce_to_int_or_var_list v =
 (** Abstract application, to print ltac functions *)
 type appl =
   | UnnamedAppl (** For generic applications: nothing is printed *)
-  | GlbAppl of (Names.KerName.t * Val.t list) list
+  | GlbAppl of (Names.KerName.t * NamedVal.t list) list
        (** For calls to global constants, some may alias other. *)
 
 let pr_argument_type arg =
@@ -430,10 +452,10 @@ type tacvalue =
       appl *
       Tacexpr.ltac_trace *
       Loc.t option * (* when executing a global Ltac function: the location where this function was called *)
-      Val.t Id.Map.t * (* closure *)
+      NamedVal.t Id.Map.t * (* closure *)
       Name.t list * (* binders *)
       Tacexpr.glob_tactic_expr (* body *)
-  | VRec of Val.t Id.Map.t ref * Tacexpr.glob_tactic_expr
+  | VRec of NamedVal.t Id.Map.t ref * Tacexpr.glob_tactic_expr
 
 let (wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type) =
   let wit = Genarg.create_arg "tacvalue" in
@@ -441,10 +463,14 @@ let (wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type) =
   let pr = function
     | VFun (a,_,loc,ids,l,tac) ->
       let tac = if List.is_empty l then tac else CAst.make ?loc @@ Tacexpr.TacFun (l,tac) in
-      let pr_env env sigma = if Id.Map.is_empty ids then mt () else cut () ++ str "where" ++ Id.Map.fold (fun id c pp -> cut () ++ Id.print id ++ str " := " ++ pr_value (Some (env,sigma)) c ++ pp) ids (mt ()) in
+      let pr_env env sigma = if Id.Map.is_empty ids then mt () else cut () ++ str "where" ++ Id.Map.fold (fun id c pp -> cut () ++ Id.print id ++ str " := " ++ pr_value (Some (env,sigma)) c.Proofview.Named.v ++ pp) ids (mt ()) in
       Genprint.TopPrinterNeedsContext (fun env sigma -> v 0 (hov 0 (Pptactic.pr_glob_tactic env sigma tac) ++ pr_env env sigma))
     | _ -> Genprint.TopPrinterBasic (fun _ -> str "<tactic closure>") in
   let () = Genprint.register_val_print0 (base_val_typ wit) pr in
+  Genprint.register_print0 wit
+  (fun _ -> assert false)
+  (fun _ -> assert false)
+  pr;
   wit
 
 exception CoercionError of Id.t * (Environ.env * Evd.evar_map) option * Val.t * string
@@ -459,3 +485,116 @@ end
 
 let error_ltac_variable ?loc id env v s =
   Loc.raise ?loc (CoercionError (id, env, v, s))
+
+(** {5 Late args} *)
+
+type late_arg = int
+
+let late_arg_ctr = ref 0
+
+let new_late_arg () = incr late_arg_ctr; !late_arg_ctr
+
+type late_args_map =
+  (late_arg * raw_generic_argument) list *
+  (late_arg * glob_generic_argument) list
+
+let f_late_args_map : late_args_map Evd.Store.field = Evd.Store.field "late_args_map"
+
+let retrieve_raw_late_arg late_arg =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  Proofview.tclUNIT (fst late_args_map |> List.assoc late_arg)
+
+let populate_raw_late_arg late_arg v =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  let late_args_map = ((late_arg, v) :: fst late_args_map, snd late_args_map) in
+  let store = Evd.Store.set store f_late_args_map late_args_map in
+  let sigma = Evd.set_extra_data store sigma in
+  Proofview.Unsafe.tclEVARS sigma
+
+let wrap_populate_raw_late_arg late_arg v tac =
+  retrieve_raw_late_arg late_arg >>= fun initial ->
+  populate_raw_late_arg late_arg v <*>
+  tac >>= fun r ->
+  populate_raw_late_arg late_arg initial <*>
+  Proofview.tclUNIT r
+
+let retrieve_glob_late_arg late_arg =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  Proofview.tclUNIT (snd late_args_map |> List.assoc late_arg)
+
+let populate_glob_late_arg late_arg v =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  let late_args_map = (fst late_args_map, (late_arg, v) :: snd late_args_map) in
+  let store = Evd.Store.set store f_late_args_map late_args_map in
+  let sigma = Evd.set_extra_data store sigma in
+  Printf.eprintf "!! %d %d\n" late_arg (snd late_args_map |> List.length);
+  Proofview.Unsafe.tclEVARS sigma
+
+let wrap_populate_glob_late_arg late_arg v tac =
+  retrieve_glob_late_arg late_arg >>= fun initial ->
+  populate_glob_late_arg late_arg v <*>
+  tac >>= fun r ->
+  populate_glob_late_arg late_arg initial <*>
+  Proofview.tclUNIT r
+
+let wrap_keep_late_args t =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  t >>= fun r ->
+  let store = Evd.Store.set store f_late_args_map late_args_map in
+  let sigma = Evd.set_extra_data store sigma in
+  Proofview.Unsafe.tclEVARS sigma <*>
+  Proofview.tclUNIT r
+
+let wit_late_arg : (late_arg, late_arg, Empty.t) genarg_type =
+  let wit = Genarg.create_arg "late_arg" in
+  let () = register_val0 wit None in
+  Pptactic.declare_extra_genarg_pprule_with_level
+    wit
+    (fun env sigma _ _ _ n late_arg ->
+      let store = Evd.get_extra_data sigma in
+      let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+      Pputils.pr_raw_generic env sigma (Some n) (fst late_args_map |> List.assoc late_arg)
+    )
+    (fun env sigma _ _ _ n late_arg ->
+      let store = Evd.get_extra_data sigma in
+      let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+      Printf.eprintf "?? %d %d\n" late_arg (snd late_args_map |> List.length);
+      Pputils.pr_glb_generic env sigma (Some n) (snd late_args_map |> List.assoc late_arg)
+    )
+    (fun env sigma _ _ _ n late_constr -> assert false)
+    Ppconstr.ltop Ppconstr.lsimpleconstr;
+  wit
+
+let glob_late_arg_tac_arg ?isquot late_arg =
+  Tacexpr.TacGeneric (isquot, GenArg (Glbwit wit_late_arg, late_arg))
+
+let glob_late_arg_tac ?isquot late_arg =
+  CAst.make (Tacexpr.TacArg (glob_late_arg_tac_arg ?isquot late_arg))
+
+(** {5 Printed args} *)
+
+let wit_printed_arg : (Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg) genarg_type =
+  let wit = Genarg.create_arg "printed_arg" in
+  let () = register_val0 wit None in
+  Pptactic.declare_extra_genarg_pprule
+    wit
+    (fun env sigma _ _ _ msg -> msg ())
+    (fun env sigma _ _ _ msg -> msg ())
+    (fun env sigma _ _ _ msg -> msg ());
+  wit
+
+let glob_printed_arg_tac_arg ?isquot msg =
+  Tacexpr.TacGeneric (isquot, GenArg (Glbwit wit_printed_arg, msg))
+
+let glob_printed_arg_tac ?isquot msg =
+  CAst.make (Tacexpr.TacArg (glob_printed_arg_tac_arg ?isquot msg))

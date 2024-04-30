@@ -107,7 +107,7 @@ let rec closed_under sigma cset t =
 let closed_term args _ = match args with
 | [t; l] ->
   let t = Option.get (Value.to_constr t) in
-  let l = List.map (fun c -> Value.cast (Genarg.topwit Stdarg.wit_ref) c) (Option.get (Value.to_list l)) in
+  let l = List.map (fun c -> Taccoerce.Value.cast (Genarg.topwit Stdarg.wit_ref) c) (Option.get (Value.to_list l)) in
   Proofview.tclEVARMAP >>= fun sigma ->
   let cs = List.fold_right GlobRef.Set_env.add l GlobRef.Set_env.empty in
   if closed_under sigma cs t then Proofview.tclUNIT () else Tacticals.tclFAIL (mt())
@@ -187,7 +187,7 @@ let exec_tactic env sigma n f args =
   let fold arg (i, vars, lfun) =
     let id = Id.of_string ("x" ^ string_of_int i) in
     let x = Reference (ArgVar CAst.(make id)) in
-    (succ i, x :: vars, Id.Map.add id (Value.of_constr arg) lfun)
+    (succ i, x :: vars, Id.Map.add id (Value.of_constr env sigma arg) lfun)
   in
   let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
   let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun = lfun; } in
@@ -658,7 +658,7 @@ let make_term_list env sigma carrier rl =
   in
   Typing.solve_evars env sigma l
 
-let carg c = Tacinterp.Value.of_constr (EConstr.of_constr c)
+let carg c = Taccoerce.Value.of_constr (EConstr.of_constr c)
 let tacarg expr =
   Tacinterp.Value.of_closure (Tacinterp.default_ist ()) expr
 
@@ -677,18 +677,18 @@ let ltac_ring_structure e =
   [req;sth;ext;morph;th;cst_tac;pow_tac;
    lemma1;lemma2;pretac;posttac]
 
-let ring_lookup (f : Value.t) lH rl t =
+let ring_lookup (f : Taccoerce.Value.t) lH rl t =
   Proofview.Goal.enter begin fun gl ->
     let sigma = Tacmach.project gl in
     let env = Proofview.Goal.env gl in
     let rl = make_args_list sigma rl t in
     let e = find_ring_structure env sigma rl in
     let sigma, l = make_term_list env sigma (EConstr.of_constr e.ring_carrier) rl in
-    let rl = Value.of_constr l in
+    let rl = Taccoerce.Value.of_constr l in
     let sigma, l = make_hyp_list env sigma lH in
-    let lH = Value.of_constr l in
+    let lH = Taccoerce.Value.of_constr l in
     let ring = ltac_ring_structure e in
-    Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma) (Value.apply f (ring@[lH;rl]))
+    Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma) (Value.apply (Geninterp.NamedVal.make f) ((ring@[lH;rl]) |> List.map Geninterp.NamedVal.make))
   end
 
 (***********************************************************************)
@@ -969,16 +969,16 @@ let ltac_field_structure e =
   [req;cst_tac;pow_tac;field_ok;field_simpl_ok;field_simpl_eq_ok;
    field_simpl_eq_in_ok;cond_ok;pretac;posttac]
 
-let field_lookup (f : Value.t) lH rl t =
+let field_lookup (f : Taccoerce.Value.t) lH rl t =
   Proofview.Goal.enter begin fun gl ->
     let sigma = Tacmach.project gl in
     let env = Proofview.Goal.env gl in
     let rl = make_args_list sigma rl t in
     let e = find_field_structure env sigma rl in
     let sigma, c = make_term_list env sigma (EConstr.of_constr e.field_carrier) rl in
-    let rl = Value.of_constr c in
+    let rl = Taccoerce.Value.of_constr c in
     let sigma, l = make_hyp_list env sigma lH in
-    let lH = Value.of_constr l in
+    let lH = Taccoerce.Value.of_constr l in
     let field = ltac_field_structure e in
-    Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma) (Value.apply f (field@[lH;rl]))
+    Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma) (Value.apply (Geninterp.NamedVal.make f) ((field@[lH;rl]) |> List.map Geninterp.NamedVal.make))
   end

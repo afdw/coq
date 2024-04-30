@@ -44,7 +44,19 @@ sig
   val to_list : t -> t list option
   val to_option : t -> t option option
   val to_pair : t -> (t * t) option
-  val cast : 'a typed_abstract_argument_type -> Geninterp.Val.t -> 'a
+  val cast : 'a typed_abstract_argument_type -> t -> 'a
+end
+
+module NamedValue :
+sig
+  type t = NamedVal.t
+
+  val of_constr : Environ.env -> Evd.evar_map -> constr -> t
+  val to_constr : t -> constr option
+  val of_int : int -> t
+  val to_int : t -> int option
+  val to_list : t -> Geninterp.Val.t list option
+  val cast : 'a typed_abstract_argument_type -> t -> 'a
 end
 
 (** {5 Coercion functions} *)
@@ -102,14 +114,46 @@ val error_ltac_variable : ?loc:Loc.t -> Id.t ->
 (** Abstract application, to print ltac functions *)
 type appl =
   | UnnamedAppl (** For generic applications: nothing is printed *)
-  | GlbAppl of (Names.KerName.t * Val.t list) list
+  | GlbAppl of (Names.KerName.t * NamedVal.t list) list
        (** For calls to global constants, some may alias other. *)
 
 type tacvalue =
-  | VFun of appl * Tacexpr.ltac_trace * Loc.t option * Val.t Id.Map.t *
+  | VFun of appl * Tacexpr.ltac_trace * Loc.t option * NamedVal.t Id.Map.t *
       Name.t list * Tacexpr.glob_tactic_expr
-  | VRec of Val.t Id.Map.t ref * Tacexpr.glob_tactic_expr
+  | VRec of NamedVal.t Id.Map.t ref * Tacexpr.glob_tactic_expr
 
 val wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type
 
 val pr_value : (Environ.env * Evd.evar_map) option -> Geninterp.Val.t -> Pp.t
+
+(** {5 Late args} *)
+
+type late_arg
+
+val new_late_arg : unit -> late_arg
+
+type late_args_map
+
+val f_late_args_map : late_args_map Evd.Store.field
+
+val retrieve_raw_late_arg : late_arg -> raw_generic_argument Proofview.tactic
+val populate_raw_late_arg : late_arg -> raw_generic_argument -> unit Proofview.tactic
+val wrap_populate_raw_late_arg : late_arg -> raw_generic_argument -> 'a Proofview.tactic -> 'a Proofview.tactic
+
+val retrieve_glob_late_arg : late_arg -> glob_generic_argument Proofview.tactic
+val populate_glob_late_arg : late_arg -> glob_generic_argument -> unit Proofview.tactic
+val wrap_populate_glob_late_arg : late_arg -> glob_generic_argument -> 'a Proofview.tactic -> 'a Proofview.tactic
+
+val wrap_keep_late_args : 'a Proofview.tactic -> 'a Proofview.tactic
+
+val wit_late_arg : (late_arg, late_arg, Empty.t) genarg_type
+
+val glob_late_arg_tac_arg : ?isquot:string -> late_arg -> Tacexpr.glob_tactic_arg
+val glob_late_arg_tac : ?isquot:string -> late_arg -> Tacexpr.glob_tactic_expr
+
+(** {5 Printed args} *)
+
+val wit_printed_arg : (Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg) genarg_type
+
+val glob_printed_arg_tac_arg : ?isquot:string -> Proofview_monad.Info.lazy_msg -> Tacexpr.glob_tactic_arg
+val glob_printed_arg_tac : ?isquot:string -> Proofview_monad.Info.lazy_msg -> Tacexpr.glob_tactic_expr

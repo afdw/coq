@@ -442,16 +442,84 @@ module Trace = struct
 
   type tactic_wrapper = {wrap : 'a. 'a tactic -> 'a tactic}
 
+  let id_tactic_wrapper = {wrap = Fun.id}
+  let compose_tactic_wrappers w1 w2 = {wrap = fun t -> w1.wrap (w2.wrap t)}
+
+  let tag_deferred_contents deferred_id t = InfoL.tag (Info.TagDeferredContents deferred_id) t
+  let tag_new_deferred_contents t =
+    let open Proof in
+    tclUNIT () >>= fun () ->
+    let deferred_id = Proofview_monad.Info.new_deferred_id () in
+    InfoL.tag (Info.TagDeferredContents deferred_id) t >>= fun r ->
+    tclUNIT (deferred_id, r)
+  let deferred_placeholder deferred_id = InfoL.leaf (Info.TagDeferredPlaceholder deferred_id)
+  let new_deferred_placeholder =
+    let open Proof in
+    tclUNIT () >>= fun () ->
+    let deferred_id = Proofview_monad.Info.new_deferred_id () in
+    InfoL.leaf (Info.TagDeferredPlaceholder deferred_id) >>
+    tclUNIT deferred_id
   let tag_dispatch f =
     InfoL.tag Info.TagDispatch (
       f ~tag_branch:{wrap = fun t -> InfoL.tag Info.TagDispatchBranch t}
     )
   let message m = InfoL.leaf (Info.TagMessage m)
-  let tag_tactic m t = InfoL.tag (Info.TagTactic m) t
+  let tag_tactic k m t = InfoL.tag (Info.TagTactic (k, m)) t
 
   let pr_info ?(lvl=0) info =
     assert (lvl >= 0);
     Info.(print (collapse lvl info))
+end
+
+
+module Tagged = struct
+  type 'a t = {
+    tags : Info.tag list tactic;
+    v : 'a;
+  }
+
+  let empty_tags = tclUNIT []
+
+  let cons_tags info tags =
+    let open Proof in
+    info >>= fun info ->
+    tags >>= fun tags ->
+    tclUNIT (info :: tags)
+
+  let append_tags tags_1 tags_2 =
+    let open Proof in
+    tags_1 >>= fun tags_1 ->
+    tags_2 >>= fun tags_2 ->
+    tclUNIT (tags_1 @ tags_2)
+
+  let concat_tags tags_l =
+    List.fold_right append_tags tags_l empty_tags
+
+  let make ?(tags=empty_tags) v = {tags; v}
+
+  let append tags n =
+    {n with tags = append_tags tags n.tags}
+
+  let map f n = {n with v = f n.v}
+end
+
+module Named = struct
+  type 'a t = {
+    msg : Info.lazy_msg option;
+    v : 'a;
+  }
+
+  let make ?msg v = {msg; v}
+
+  let map f n = {n with v = f n.v}
+
+  let transpose_list sep l =
+    if l |> List.for_all (fun n -> Option.has_some n.msg) then
+      make
+        ~msg:(fun () -> l |> Pp.prlist_with_sep sep (fun n -> (Option.get n.msg) ()))
+        (l |> List.map (fun n -> n.v))
+    else
+      make(l |> List.map (fun n -> n.v))
 end
 
 
@@ -648,7 +716,7 @@ let tclINDEPENDENTL tac =
 (** Shelves all the goals under focus. *)
 let shelve =
   let open Proof in
-  Trace.tag_tactic (fun () -> Pp.str "shelve") (
+  Trace.tag_tactic (Proofview_monad.Info.Primitive (Pp.str "shelve")) (fun () -> Pp.str "shelve") (
     Comb.get >>= fun initial ->
     Comb.set [] >>
     let initial = CList.map drop_state initial in
@@ -657,7 +725,7 @@ let shelve =
 
 let shelve_goals l =
   let open Proof in
-  Trace.tag_tactic (fun () -> Pp.str "shelve_goals") (
+  Trace.tag_tactic (Proofview_monad.Info.Primitive (Pp.str "shelve_goals")) (fun () -> Pp.str "shelve_goals") (
     Comb.get >>= fun initial ->
     let comb = CList.filter (fun g -> not (CList.mem (drop_state g) l)) initial in
     Comb.set comb >>
@@ -724,7 +792,7 @@ let partition_unifiable sigma l =
     considered). *)
 let shelve_unifiable_informative =
   let open Proof in
-  Trace.tag_tactic (fun () -> Pp.str "shelve_unifiable") (
+  Trace.tag_tactic (Proofview_monad.Info.Primitive (Pp.str "shelve_unifable")) (fun () -> Pp.str "shelve_unifiable") (
     Pv.get >>= fun initial ->
     let (u, n) = partition_unifiable initial.solution initial.comb in
     Comb.set n >>
@@ -816,7 +884,7 @@ let goodmod p m =
     if p' < 0 then p'+m else p'
 
 let cycle n =
-  Trace.tag_tactic (fun () -> Pp.(str "cycle" ++ spc () ++ int n)) (
+  Trace.tag_tactic (Proofview_monad.Info.Primitive (Pp.str "cycle")) (fun () -> Pp.(str "cycle" ++ spc () ++ int n)) (
     Comb.modify (fun initial ->
       let l = CList.length initial in
       let n' = goodmod n l in
@@ -826,7 +894,7 @@ let cycle n =
   )
 
 let swap i j =
-  Trace.tag_tactic (fun () -> Pp.(str "swap" ++ spc () ++ int i ++ spc () ++ int j)) (
+  Trace.tag_tactic (Proofview_monad.Info.Primitive (Pp.str "swap")) (fun () -> Pp.(str "swap" ++ spc () ++ int i ++ spc () ++ int j)) (
     Comb.modify (fun initial ->
       let l = CList.length initial in
       let i = if i > 0 then i - 1 else i
@@ -843,7 +911,7 @@ let swap i j =
   )
 
 let revgoals =
-  Trace.tag_tactic (fun () -> Pp.str "revgoals") (Comb.modify CList.rev)
+  Trace.tag_tactic (Proofview_monad.Info.Primitive (Pp.str "revgoals")) (fun () -> Pp.str "revgoals") (Comb.modify CList.rev)
 
 let numgoals =
   let open Proof in
@@ -883,7 +951,7 @@ let give_up evs pv =
 
 let give_up =
   let open Proof in
-  Trace.tag_tactic (fun () -> Pp.str "give_up") (
+  Trace.tag_tactic (Proofview_monad.Info.Primitive (Pp.str "give_up")) (fun () -> Pp.str "give_up") (
     Comb.get >>= fun initial ->
     Comb.set [] >>
     mark_as_unsafe >>

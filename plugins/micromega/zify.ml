@@ -1416,12 +1416,15 @@ let iter_let_aux tac =
       init_cache ();
       Tacticals.tclMAP (do_let tac) sign)
 
-let iter_let (tac : Ltac_plugin.Tacinterp.Value.t) =
+let iter_let (tac : Ltac_plugin.Taccoerce.Value.t) =
+  let open Proofview.Monad in
+  Proofview.tclENV >>= fun env ->
+  Proofview.tclEVARMAP >>= fun sigma ->
   iter_let_aux (fun (id : Names.Id.t) t ty ->
-      Ltac_plugin.Tacinterp.Value.apply tac
-        [ Ltac_plugin.Tacinterp.Value.of_constr (EConstr.mkVar id)
-        ; Ltac_plugin.Tacinterp.Value.of_constr t
-        ; Ltac_plugin.Tacinterp.Value.of_constr ty ])
+      Ltac_plugin.Tacinterp.Value.apply (Geninterp.NamedVal.make tac)
+        [ Ltac_plugin.Tacinterp.Value.of_constr env sigma (EConstr.mkVar id)
+        ; Ltac_plugin.Tacinterp.Value.of_constr env sigma t
+        ; Ltac_plugin.Tacinterp.Value.of_constr env sigma ty ])
 
 let elim_let = iter_let_aux elim_binding
 
