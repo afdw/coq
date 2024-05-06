@@ -125,7 +125,10 @@ let conclPattern concl pat tac =
                ; extra = TacStore.empty } in
      match tac with
      | GenArg (Glbwit wit, tac) ->
-      Ftactic.run (Geninterp.interp wit ist tac) (fun _ -> Proofview.tclUNIT ())
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Ftactic.run (Geninterp.interp wit deferred_id ist tac) (fun v ->
+        Proofview.Trace.tag_deferred_contents v.Proofview.Tagged.deferred_id (Proofview.tclUNIT ())
+      )
   end
 
 (***********************************************************)

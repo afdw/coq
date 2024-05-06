@@ -29,7 +29,7 @@ sig
   val of_closure : Geninterp.interp_sign -> glob_tactic_expr -> t
   val cast : 'a typed_abstract_argument_type -> Geninterp.Val.t -> 'a
   val apply : t -> t list -> unit Proofview.tactic
-  val apply_val : t -> t list -> t Ftactic.t
+  val apply_val : Proofview_monad.Info.deferred_id -> t -> t list -> Geninterp.TaggedVal.t Ftactic.t
 end
 
 (** Values for interpretation *)
@@ -68,13 +68,13 @@ val type_uconstr :
 
 (** Adds an interpretation function for extra generic arguments *)
 
-val interp_genarg : interp_sign -> glob_generic_argument -> Value.t Ftactic.t
+val interp_genarg : Proofview_monad.Info.deferred_id -> interp_sign -> glob_generic_argument -> Geninterp.TaggedVal.t Ftactic.t
 
 (** Interprets any expression *)
-val val_interp : interp_sign -> glob_tactic_expr -> (value -> unit Proofview.tactic) -> unit Proofview.tactic
+val val_interp : interp_sign -> glob_tactic_expr -> (Geninterp.TaggedVal.t -> unit Proofview.tactic) -> unit Proofview.tactic
 
 (** Interprets an expression that evaluates to a constr *)
-val interp_ltac_constr : interp_sign -> glob_tactic_expr -> (constr -> unit Proofview.tactic) -> unit Proofview.tactic
+val interp_ltac_constr : interp_sign -> glob_tactic_expr -> (constr Proofview.Tagged.t -> unit Proofview.tactic) -> unit Proofview.tactic
 
 (** Interprets redexp arguments *)
 val interp_red_expr : interp_sign -> Environ.env -> Evd.evar_map -> Genredexpr.glob_red_expr -> Evd.evar_map * red_expr

@@ -106,6 +106,12 @@ let _ =
   register_val_print0 Val.typ_pair
     (fun (v1,v2) -> combine pr_pair (generic_val_print v1) v2)
 
+let printer_result_of_top_printer_result pr =
+  match pr with
+  | TopPrinterBasic pr -> PrinterBasic (fun _ _ -> pr ())
+  | TopPrinterNeedsContext pr -> PrinterBasic pr
+  | TopPrinterNeedsContextAndLevel pr -> PrinterNeedsLevel pr
+
 (* Printing generic arguments *)
 
 type ('raw, 'glb, 'top) genprinter = {

@@ -1551,6 +1551,7 @@ let map ~f p = { p with proof = f p.proof }
 let map_fold ~f p = let proof, res = f p.proof in { p with proof }, res
 
 let map_fold_endline ~f ps =
+  let open Proofview.Notations in
   let et =
     match ps.endline_tactic with
     | None -> Proofview.tclUNIT ()
@@ -1559,8 +1560,10 @@ let map_fold_endline ~f ps =
       let {Proof.poly} = Proof.data ps.proof in
       let ist = { lfun = Id.Map.empty; poly; extra = TacStore.empty } in
       let Genarg.GenArg (Genarg.Glbwit tag, tac) = tac in
-      let tac = Geninterp.interp tag ist tac in
-      Ftactic.run tac (fun _ -> Proofview.tclUNIT ())
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Ftactic.run (Geninterp.interp tag deferred_id ist tac) (fun v ->
+        Proofview.Trace.tag_deferred_contents v.Proofview.Tagged.deferred_id (Proofview.tclUNIT ())
+      )
   in
   let (newpr,ret) = f et ps.proof in
   let ps = { ps with proof = newpr } in
