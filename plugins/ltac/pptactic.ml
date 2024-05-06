@@ -245,16 +245,15 @@ let string_of_genarg_arg (ArgumentType arg) =
     in
     pr_sequence (fun x -> x) l
 
-  let pr_extend_gen pr_gen _ { mltac_name = s; mltac_index = i } l =
-      let name =
-        str s.mltac_plugin ++ str "::" ++ str s.mltac_tactic ++
-        str "@" ++ int i
-      in
+  let pr_extend_name { mltac_name = s; mltac_index = i } =
+    str s.mltac_plugin ++ str "::" ++ str s.mltac_tactic ++ str "@" ++ int i
+
+  let pr_extend_gen pr_gen _ opn l =
       let args = match l with
         | [] -> mt ()
         | _ -> spc() ++ pr_sequence pr_gen l
       in
-      hov 2 (str "<" ++ name ++ str ">" ++ args)
+      hov 2 (str "<" ++ pr_extend_name opn ++ str ">" ++ args)
 
   let rec pr_user_symbol = function
   | Extend.Ulist1 tkn -> "ne_" ^ pr_user_symbol tkn ^ "_list"
@@ -281,20 +280,21 @@ let string_of_genarg_arg (ArgumentType arg) =
       KerName.print key
 
   let pr_alias_gen pr_gen lev key l =
+    let exception AliasNotFound in
     try
-      let pp = KNmap.find key !prnotation_tab in
+      let pp = try KNmap.find key !prnotation_tab with Not_found -> raise AliasNotFound in
       let rec pack prods args = match prods, args with
       | [], [] -> []
       | TacTerm s :: prods, args -> TacTerm s :: pack prods args
       | TacNonTerm (_, (_, None)) :: prods, args -> pack prods args
       | TacNonTerm (loc, (symb, (Some _ as ido))) :: prods, arg :: args ->
         TacNonTerm (loc, ((symb, arg), ido)) :: pack prods args
-      | _ -> raise Not_found
+      | _ -> raise AliasNotFound
       in
       let prods = pack pp.pptac_prods l in
       let p = hov 2 (pr_tacarg_using_rule pr_gen prods) in
       if pp.pptac_level > lev then surround p else p
-    with Not_found ->
+    with AliasNotFound ->
       let pr _ = str "_" in
       hov 2 (KerName.print key ++ spc () ++ pr_sequence pr l ++ str " (* Generic printer *)")
 
@@ -316,9 +316,14 @@ let string_of_genarg_arg (ArgumentType arg) =
   | Glbwit (OptArg wit) -> Some (Option.map (in_gen (glbwit wit)) arg)
   | _ -> None
 
+  let is_raw_arg wit =
+    match wit with
+    | ArgumentType (ExtraArg tag) when ArgT.repr tag = "late_arg" || ArgT.repr tag = "printed_arg" -> true
+    | _ -> false
+
   let rec pr_any_arg : type l. (_ -> l generic_argument -> Pp.t) -> _ -> l generic_argument -> Pp.t =
   fun prtac symb arg -> match symb with
-  | Extend.Uentry tag when is_genarg tag (genarg_tag arg) -> prtac LevelSome arg
+  | Extend.Uentry tag when is_genarg tag (genarg_tag arg) || is_raw_arg (genarg_tag arg) -> prtac LevelSome arg
   | Extend.Ulist1 s | Extend.Ulist0 s ->
     begin match get_list arg with
     | None -> str "ltac:(" ++ prtac LevelSome arg ++ str ")"
@@ -577,7 +582,7 @@ let pr_goal_selector ~toplevel s =
     let pr = function
       | TacGeneric (_,arg) ->
          let name = string_of_genarg_arg (genarg_tag arg) in
-         if name = "unit" || name = "int" then
+         if name = "unit" || name = "int" || name = "late_arg" then
            (* Hard-wired parsing rules *)
            pr_gen  arg
          else
@@ -1038,6 +1043,9 @@ let pr_goal_selector ~toplevel s =
               (match isquot with Some name -> str name ++ str ":(" ++ p ++ str ")" | None -> p), latom
             | TacArg (TacCall {CAst.v=(f,[])}) ->
               pr.pr_reference f, latom
+            | TacArg (TacCall {CAst.loc; v=(f,l)}) when Pp.string_of_ppcmds (pr.pr_reference f) = "" ->
+              pr_with_comments ?loc (hov 1 (prlist_with_sep spc pr_tacarg l)),
+              lcall
             | TacArg (TacCall {CAst.loc; v=(f,l)}) ->
               pr_with_comments ?loc (hov 1 (
                 pr.pr_reference f ++ spc ()

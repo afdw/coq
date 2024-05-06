@@ -13,8 +13,8 @@ open Proofview.Notations
 (** Focussing tactics *)
 
 type 'a focus =
-| Uniform of 'a
-| Depends of 'a list
+| Uniform of 'a Proofview.tactic * 'a list Proofview.tactic
+| Depends of ('a * Proofview_monad.Info.deferred_id) list
 
 (** Type of tactics potentially goal-dependent. If it contains a [Depends],
     then the length of the inner list is guaranteed to be the number of
@@ -22,18 +22,36 @@ type 'a focus =
     on the current set of focused goals. *)
 type 'a t = 'a focus Proofview.tactic
 
-let return (x : 'a) : 'a t = Proofview.tclUNIT (Uniform x)
+let distribute_copy x =
+  Proofview.tclINDEPENDENTL (Proofview.tclUNIT x)
+
+let distribute_tagged x =
+  Proofview.Trace.tag_deferred_contents x.Proofview.Tagged.deferred_id (
+    Proofview.tclINDEPENDENTL (
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Proofview.tclUNIT (Proofview.Tagged.make deferred_id x.Proofview.Tagged.v)
+    )
+  )
+
+let return ?(distribute = (distribute_copy : 'a -> 'a list Proofview.tactic)) (x : 'a) : 'a t =
+  Proofview.tclUNIT (Uniform (Proofview.tclUNIT x, distribute x))
 
 let bind (type a) (type b) (m : a t) (f : a -> b t) : b t = m >>= function
-| Uniform x -> f x
+| Uniform (single, _distributed) ->
+  single >>= fun x ->
+  f x
 | Depends l ->
-  let f arg = f arg >>= function
-  | Uniform x ->
+  let f (arg, deferred_id) =
+  Proofview.Trace.tag_deferred_contents deferred_id (f arg) >>= function
+  | Uniform (_single, distributed) ->
     (* We dispatch the uniform result on each goal under focus, as we know
        that the [m] argument was actually dependent. *)
     Proofview.Goal.goals >>= fun goals ->
-    let ans = List.map (fun g -> (g,x)) goals in
-    Proofview.tclUNIT ans
+    distributed >>= fun xs ->
+    List.combine goals xs |> Proofview.Monad.List.map (fun (g, x) ->
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Proofview.tclUNIT (g, (x, deferred_id))
+    )
   | Depends l ->
     Proofview.Goal.goals >>= fun goals ->
     Proofview.tclUNIT (List.combine goals l)
@@ -44,17 +62,28 @@ let bind (type a) (type b) (m : a t) (f : a -> b t) : b t = m >>= function
      result would not have the same length as the list of focused
      goals, which is an invariant of the [Ftactic] module. It is the
      reason why a goal is attached to each result above. *)
-  let filter (g,x) =
+  let filter (g, (x, deferred_id)) =
     g >>= fun g ->
     Proofview.Goal.unsolved g >>= function
-    | true -> Proofview.tclUNIT (Some x)
-    | false -> Proofview.tclUNIT None
+    | true -> Proofview.tclUNIT (Some (x, deferred_id))
+    | false ->
+      Proofview.Trace.tag_deferred_contents deferred_id (Proofview.tclUNIT None)
   in
   Proofview.tclDISPATCHL (List.map f l) >>= fun l ->
   Proofview.Monad.List.map_filter filter (List.concat l) >>= fun filtered ->
   Proofview.tclUNIT (Depends filtered)
 
-let goals = Proofview.Goal.goals >>= fun l -> Proofview.tclUNIT (Depends l)
+let goals =
+  Proofview.Goal.goals >>= fun l ->
+  Proofview.Trace.tag_dispatch (fun ~tag_branch ->
+    l |> Proofview.Monad.List.map (fun goal ->
+      tag_branch.wrap (
+        Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        Proofview.tclUNIT (goal, deferred_id)
+      )
+    )
+  ) >>= fun l ->
+  Proofview.tclUNIT (Depends l)
 
 let enter f =
   bind goals
@@ -62,21 +91,37 @@ let enter f =
 
 let with_env t =
   t >>= function
-    | Uniform a ->
-        Proofview.tclENV >>= fun env -> Proofview.tclUNIT (Uniform (env,a))
+    | Uniform (single, distributed) ->
+        Proofview.tclENV >>= fun env ->
+        Proofview.tclUNIT (Uniform (
+          (
+            single >>= fun x ->
+            Proofview.tclUNIT (env, x)
+          ),
+          (
+            distributed >>= fun xs ->
+            Proofview.tclUNIT (xs |> List.map (fun x -> (env, x))))
+          )
+        )
     | Depends l ->
         Proofview.Goal.goals >>= fun gs ->
         Proofview.Monad.(List.map (map Proofview.Goal.env) gs) >>= fun envs ->
-        Proofview.tclUNIT (Depends (List.combine envs l))
+        Proofview.tclUNIT (Depends (
+          List.combine envs l |> List.map (fun (env, (x, deferred_id)) -> ((env, x), deferred_id))
+        ))
 
-let lift (type a) (t:a Proofview.tactic) : a t =
-  Proofview.tclBIND t (fun x -> Proofview.tclUNIT (Uniform x))
+let lift (type a) ?(distribute : (a -> a list Proofview.tactic) option) (t:a Proofview.tactic) : a t =
+  Proofview.tclBIND t (return ?distribute)
 
 (** If the tactic returns unit, we can focus on the goals if necessary. *)
 let run m k = m >>= function
-| Uniform v -> k v
+| Uniform (sinlge, _distributed) ->
+  sinlge >>= fun x ->
+  k x
 | Depends l ->
-  let tacs = List.map k l in
+  let tacs = l |> List.map (fun (x, deferred_id) ->
+    Proofview.Trace.tag_deferred_contents deferred_id (k x)
+  ) in
   Proofview.tclDISPATCH tacs
 
 let (>>=) = bind
@@ -86,7 +131,7 @@ let (<*>) = fun m n -> bind m (fun () -> n)
 module Self =
 struct
   type 'a t = 'a focus Proofview.tactic
-  let return = return
+  let return x = return x
   let (>>=) = bind
   let (>>) = (<*>)
   let map f x = x >>= fun a -> return (f a)

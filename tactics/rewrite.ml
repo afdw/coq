@@ -632,12 +632,16 @@ let solve_remaining_by env sigma holes by =
     in
     (* Only solve independent holes *)
     let indep = List.map_filter map holes in
-    let ist = { Geninterp.lfun = Id.Map.empty
-              ; poly = false
-              ; extra = Geninterp.TacStore.empty } in
     let solve_tac = match tac with
     | Genarg.GenArg (Genarg.Glbwit tag, tac) ->
-      Ftactic.run (Geninterp.interp tag ist tac) (fun _ -> Proofview.tclUNIT ())
+      Ftactic.run (
+        Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        let ist = { Geninterp.deferred_id
+                  ; lfun = Id.Map.empty
+                  ; poly = false
+                  ; extra = Geninterp.TacStore.empty } in
+        Geninterp.interp tag ist tac
+      ) (fun _ -> Proofview.tclUNIT ())
     in
     let solve_tac = tclCOMPLETE solve_tac in
     let solve sigma evk =

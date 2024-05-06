@@ -120,7 +120,9 @@ let conclPattern concl pat tac =
      in
      let fold id c accu = Id.Map.add id (inj c) accu in
      let lfun = Id.Map.fold fold constr_bindings Id.Map.empty in
-     let ist = { lfun
+     Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+     let ist = { deferred_id
+               ; lfun
                ; poly
                ; extra = TacStore.empty } in
      match tac with
