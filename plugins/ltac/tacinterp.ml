@@ -96,30 +96,6 @@ let push_appl appl args =
   match appl with
   | UnnamedAppl -> UnnamedAppl
   | GlbAppl l -> GlbAppl (List.map (fun (h,vs) -> (h,vs@args)) l)
-let pr_generic v =
-  let Val.Dyn (tag, _) = v in
-  let pr_v =
-    let env = Global.env () in
-    let sigma = Evd.from_env env in
-    Pptactic.pr_value ~context:(env, sigma) Pptactic.ltop v in
-  str "<" ++ Val.pr tag ++ str ":(" ++ pr_v ++ str ")>"
-let pr_appl h vs =
-  if vs = [] then
-    Pptactic.pr_ltac_constant h
-  else
-    Pptactic.pr_ltac_constant h ++ spc () ++
-    Pp.prlist_with_sep spc pr_generic vs
-let rec name_with_list appl t =
-  match appl with
-  | [] -> t
-  | (h, vs) :: l ->
-    Proofview.Trace.tag_tactic
-      (fun () -> pr_appl h vs)
-      (name_with_list l t)
-let name_if_glob appl t =
-  match appl with
-  | UnnamedAppl -> t
-  | GlbAppl l -> name_with_list l t
 let combine_appl appl1 appl2 =
   match appl1,appl2 with
   | UnnamedAppl,a | a,UnnamedAppl -> a
@@ -144,11 +120,17 @@ let is_traced () =
 
 (** More naming applications *)
 let name_vfun appl vle =
-  if is_traced () && has_type vle (topwit wit_tacvalue) then
-    match to_tacvalue vle with
-    | VFun (appl0,trace,loc,lfun,vars,t) -> of_tacvalue (VFun (combine_appl appl0 appl,trace,loc,lfun,vars,t))
+  if is_traced () && has_type vle.Proofview.Tagged.v (topwit wit_tacvalue) then
+    match to_tacvalue vle.Proofview.Tagged.v with
+    | VFun (appl0,trace,loc,lfun,vars,t) ->
+      TaggedVal.make
+        vle.deferred_id
+        (of_tacvalue (VFun (combine_appl appl0 appl,trace,loc,lfun,vars,t)))
     | _ -> vle
   else vle
+
+let print_late_arg = new_late_arg ()
+let top_late_arg = new_late_arg ()
 
 module TacStore = Geninterp.TacStore
 
@@ -157,6 +139,7 @@ let f_avoid_ids : Id.Set.t TacStore.field = TacStore.field "f_avoid_ids"
 let f_debug : debug_info TacStore.field = TacStore.field "f_debug"
 let f_trace : ltac_trace TacStore.field = TacStore.field "f_trace"
 let f_loc : Loc.t TacStore.field = TacStore.field "f_loc"
+let f_current_late_arg : late_arg TacStore.field = TacStore.field "f_current_late_arg"
 
 (* Signature for interpretation: val_interp and interpretation functions *)
 type interp_sign = Geninterp.interp_sign =
@@ -185,8 +168,21 @@ let ensure_loc loc ist =
     | None -> { ist with extra = TacStore.set ist.extra f_loc loc }
     | Some _ -> ist
 
-let print_top_val env sigma v =
-  Pptactic.pr_value ~context:(env, sigma) Pptactic.ltop v
+let set_current_late_arg ist current_late_arg =
+  {ist with extra = TacStore.set ist.extra f_current_late_arg current_late_arg}
+
+let populate_late_arg late_arg tac =
+  populate_glob_late_arg late_arg (Some (GenArg (Glbwit wit_tactic, tac)))
+
+let wrap_populate_late_arg late_arg tac t =
+  wrap_populate_glob_late_arg late_arg (Some (GenArg (Glbwit wit_tactic, tac))) t
+
+let populate_current_late_arg ist tac =
+  let current_late_arg = TacStore.get ist.extra f_current_late_arg |> Option.default top_late_arg in
+  populate_late_arg current_late_arg tac
+
+let assign_late_arg dest_late_arg src_late_arg =
+  populate_glob_late_arg dest_late_arg (Some (GenArg (Glbwit wit_late_arg, src_late_arg)))
 
 let catching_error call_trace fail (e, info) =
   let inner_trace =
@@ -287,8 +283,8 @@ let push_trace call ist =
   else [],[]
 
 let propagate_trace ist loc id v =
-  if has_type v (topwit wit_tacvalue) then
-    let tacv = to_tacvalue v in
+  if has_type v.Proofview.Tagged.v (topwit wit_tacvalue) then
+    let tacv = to_tacvalue v.Proofview.Tagged.v in
     match tacv with
     | VFun (appl,_,_,lfun,it,b) ->
         let kn =
@@ -299,14 +295,15 @@ let propagate_trace ist loc id v =
         let t = if List.is_empty it then b else CAst.make (TacFun (it,b)) in
         let trace = push_trace(loc,LtacVarCall (kn,id,t)) ist in
         let ans = VFun (appl,trace,loc,lfun,it,b) in
-        Proofview.tclUNIT (of_tacvalue ans)
+        Proofview.tclUNIT (TaggedVal.make v.deferred_id (of_tacvalue ans))
     | _ ->  Proofview.tclUNIT v
   else Proofview.tclUNIT v
 
 let append_trace trace v =
-  if has_type v (topwit wit_tacvalue) then
-    match to_tacvalue v with
-    | VFun (appl,trace',loc,lfun,it,b) -> of_tacvalue (VFun (appl,trace',loc,lfun,it,b))
+  if has_type v.Proofview.Tagged.v (topwit wit_tacvalue) then
+    match to_tacvalue v.Proofview.Tagged.v with
+    | VFun (appl,trace',loc,lfun,it,b) ->
+      TaggedVal.make v.deferred_id (of_tacvalue (VFun (appl,trace',loc,lfun,it,b)))
     | _ -> v
   else v
 
@@ -315,10 +312,11 @@ let coerce_to_tactic loc id v =
   let fail () = user_err ?loc
     (str "Variable " ++ Id.print id ++ str " should be bound to a tactic.")
   in
-  if has_type v (topwit wit_tacvalue) then
-    let tacv = to_tacvalue v in
+  if has_type v.Proofview.Tagged.v (topwit wit_tacvalue) then
+    let tacv = to_tacvalue v.Proofview.Tagged.v in
     match tacv with
-    | VFun (appl,trace,_,lfun,it,b) -> of_tacvalue (VFun (appl,trace,loc,lfun,it,b))
+    | VFun (appl,trace,_,lfun,it,b) ->
+      TaggedVal.make v.deferred_id (of_tacvalue (VFun (appl,trace,loc,lfun,it,b)))
     | _ -> fail ()
   else fail ()
 
@@ -1089,9 +1087,23 @@ let type_uconstr ?(flags = (constr_flags ()))
     Pretyping.understand_uconstr ~flags ~expected_type env sigma c
   end
 
+let tag_print ist k t =
+  Proofview.tclENV >>= fun env ->
+  Proofview.tclEVARMAP >>= fun sigma ->
+  Proofview.Trace.tag_tactic
+    k
+    (fun () ->
+      Pputils.pr_glb_generic env sigma None (GenArg (
+        Glbwit wit_tacvalue,
+        VFun (UnnamedAppl, extract_trace ist, None, ist.lfun, [], glob_late_arg_tac print_late_arg)
+      ))
+    )
+    t
+
 (* Interprets an l-tac expression into a value *)
-let rec val_interp_ftactic ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : Val.t Ftactic.t =
+let rec val_interp_ftactic deferred_id ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : TaggedVal.t Ftactic.t =
   debug_tacinterp (fun () -> Pp.(str "val_interp_ftactic " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac with e when CErrors.noncritical e -> str "!?!"));
+  let (>>=) = Ftactic.bind in
   (* The name [appl] of applied top-level Ltac names is ignored in
      [aux]. It is installed in the second step by a call to
      [name_vfun], because it gives more opportunities to detect a
@@ -1101,18 +1113,35 @@ let rec val_interp_ftactic ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : 
   let aux ist =
     match tac.v with
     | TacFun (it, body) ->
-      Ftactic.return (of_tacvalue (VFun (UnnamedAppl, extract_trace ist, extract_loc ist, ist.lfun, it, body)))
-    | TacLetIn (true, l, u) -> interp_letrec ist l u
-    | TacLetIn (false, l, u) -> interp_letin ist l u
-    | TacMatchGoal (lz, lr, lmr) -> interp_match_goal ist lz lr lmr
-    | TacMatch (lz, c, lmr) -> interp_match ist lz c lmr
-    | TacArg v -> debug_tacinterp (fun () -> Pp.(str "TacArg")); interp_tacarg_ftactic ist v
+      Proofview.Trace.tag_deferred_contents deferred_id (
+        populate_current_late_arg ist (CAst.make (TacFun (it, body))) <*>
+        tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacFun")) (
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          Ftactic.return (
+            TaggedVal.make deferred_id (of_tacvalue (VFun (UnnamedAppl, extract_trace ist, extract_loc ist, ist.lfun, it, body)))
+          )
+        )
+      )
+    | TacLetIn (true, l, u) -> interp_letrec deferred_id ist l u
+    | TacLetIn (false, l, u) -> interp_letin deferred_id ist l u
+    | TacMatchGoal (lz, lr, lmr) -> interp_match_goal deferred_id ist lz lr lmr
+    | TacMatch (lz, c, lmr) -> interp_match deferred_id ist lz c lmr
+    | TacArg v -> debug_tacinterp (fun () -> Pp.(str "TacArg")); interp_tacarg_ftactic deferred_id ist v
     | _ ->
       debug_tacinterp (fun () -> Pp.(str "val_interp_ftactic: Delayed evaluation"));
       (* Delayed evaluation *)
-      Ftactic.return (of_tacvalue (VFun (UnnamedAppl, extract_trace ist, extract_loc ist, ist.lfun, [], tac))) in
+      Proofview.Trace.tag_deferred_contents deferred_id (
+        populate_current_late_arg ist tac <*>
+        tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacDelay")) (
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          Ftactic.return (
+            TaggedVal.make
+              deferred_id
+              (of_tacvalue (VFun (UnnamedAppl, extract_trace ist, extract_loc ist, ist.lfun, [], tac)))
+          )
+        )
+      ) in
   Control.check_for_interrupt ();
-  let (>>=) = Ftactic.bind in
   match curr_debug ist with
   | DebugOn lev ->
     let eval v =
@@ -1125,22 +1154,28 @@ let rec val_interp_ftactic ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : 
 
 (** Interprets any expression *)
 and val_interp ist tac k =
-  Ftactic.run (val_interp_ftactic ist tac) k
+  Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+  Ftactic.run (val_interp_ftactic deferred_id ist tac) k
 
 (* Interprets tactic expressions: returns a "tactic" *)
 and interp_tactic ist tac : unit Proofview.tactic =
-  val_interp ist tac (fun v -> tactic_of_value ist v)
+  val_interp ist tac (fun v -> tactic_of_tagged_value ist v)
 
 and eval_tactic_ist ist tac : unit Proofview.tactic =
   debug_tacinterp (fun () -> Pp.(str "eval_tactic_ist " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac with e when CErrors.noncritical e -> str "!?!"));
+  let ist = set_current_late_arg ist top_late_arg in
   let loc = tac.loc in
+  let tac_interp =
   match tac.v with
   | TacAtom t ->
-      let (stack, _) = push_trace (loc, LtacAtomCall t) ist in
-      do_profile stack (catch_error_tac_loc loc stack (interp_atomic ist t))
+    let (stack, _) = push_trace (loc, LtacAtomCall t) ist in
+    do_profile stack (catch_error_tac_loc loc stack (interp_atomic ist t))
   | TacFun _ | TacLetIn _ | TacMatchGoal _ | TacMatch _ -> interp_tactic ist tac
-  | TacId [] -> Proofview.tclLIFT (db_breakpoint (curr_debug ist) [])
+  | TacId [] ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacId")) @@
+      Proofview.tclLIFT (db_breakpoint (curr_debug ist) [])
   | TacId s ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacId")) @@
       interp_message ist s (fun msg ->
         let msgnl = hov 0 msg in
         Proofview.tclLIFT (Proofview.NonLogical.print_info msgnl) <*>
@@ -1148,6 +1183,7 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
         Proofview.tclLIFT (db_breakpoint (curr_debug ist) s)
       )
   | TacFail (g, n, s) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacFail")) @@
       interp_message ist s (
         let tac ~info l = Tacticals.tclFAILn ~info (interp_int_or_var ist n) l in
         match g with
@@ -1158,8 +1194,11 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           let info = Exninfo.reify () in
           tac ~info
       )
-  | TacProgress tac -> Tacticals.tclPROGRESS (interp_tactic ist tac)
+  | TacProgress tac ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacProgress")) @@
+      Tacticals.tclPROGRESS (interp_tactic ist tac)
   | TacAbstract (t, ido) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacAbstract")) @@
       let (stack, _) = push_trace (None, LtacMLCall tac) ist in
       do_profile stack
         (catch_error_tac stack (
@@ -1170,109 +1209,158 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           )
         ))
   | TacThen (t1, t) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacThen")) @@
       Tacticals.tclTHEN (interp_tactic ist t1) (interp_tactic ist t)
   | TacDispatch tl ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacDispatch")) @@
       Proofview.tclDISPATCH (List.map (interp_tactic ist) tl)
   | TacExtendTac (tf, t, tl) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacExtendTac")) @@
       Proofview.tclEXTEND
         (Array.map_to_list (interp_tactic ist) tf)
         (interp_tactic ist t)
         (Array.map_to_list (interp_tactic ist) tl)
-  | TacThens (t1, tl) -> Tacticals.tclTHENS (interp_tactic ist t1) (List.map (interp_tactic ist) tl)
+  | TacThens (t1, tl) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacThens")) @@
+      Tacticals.tclTHENS (interp_tactic ist t1) (List.map (interp_tactic ist) tl)
   | TacThens3parts (t1, tf, t, tl) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacThens3parts")) @@
       Tacticals.tclTHENS3PARTS
         (interp_tactic ist t1)
         (Array.map (interp_tactic ist) tf)
         (interp_tactic ist t) (Array.map
         (interp_tactic ist) tl)
-  | TacDo (n, tac) -> Tacticals.tclDO (interp_int_or_var ist n) (interp_tactic ist tac)
-  | TacTimeout (n, tac) -> Tacticals.tclTIMEOUT (interp_int_or_var ist n) (interp_tactic ist tac)
-  | TacTime (s, tac) -> Tacticals.tclTIME s (interp_tactic ist tac)
-  | TacTry tac -> Tacticals.tclTRY (interp_tactic ist tac)
-  | TacRepeat tac -> Tacticals.tclREPEAT (interp_tactic ist tac)
+  | TacDo (n, tac) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacDo")) @@
+      Tacticals.tclDO (interp_int_or_var ist n) (interp_tactic ist tac)
+  | TacTimeout (n, tac) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacTimeout")) @@
+      Tacticals.tclTIMEOUT (interp_int_or_var ist n) (interp_tactic ist tac)
+  | TacTime (s, tac) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacTime")) @@
+      Tacticals.tclTIME s (interp_tactic ist tac)
+  | TacTry tac ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacTry")) @@
+      Tacticals.tclTRY (interp_tactic ist tac)
+  | TacRepeat tac ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacRepeat")) @@
+      Tacticals.tclREPEAT (interp_tactic ist tac)
   | TacOr (tac1, tac2) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacOr")) @@
       Tacticals.tclOR (interp_tactic ist tac1) (interp_tactic ist tac2)
   | TacOnce tac ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacOnce")) @@
       Tacticals.tclONCE (interp_tactic ist tac)
   | TacExactlyOnce tac ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacExactlyOnce")) @@
       Tacticals.tclEXACTLY_ONCE (interp_tactic ist tac)
   | TacIfThenCatch (t, tt, te) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacThenCatch")) @@
       Tacticals.tclIFCATCH
         (interp_tactic ist t)
         (fun () -> interp_tactic ist tt)
         (fun () -> interp_tactic ist te)
   | TacOrelse (tac1, tac2) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacOrelse")) @@
       Tacticals.tclORELSE (interp_tactic ist tac1) (interp_tactic ist tac2)
-  | TacFirst l -> Tacticals.tclFIRST (List.map (interp_tactic ist) l)
-  | TacSolve l -> Tacticals.tclSOLVE (List.map (interp_tactic ist) l)
-  | TacArg _ -> val_interp (ensure_loc loc ist) tac (fun v -> tactic_of_value ist v)
-  | TacSelect (sel, tac) -> Goal_select.tclSELECT sel (interp_tactic ist tac)
+  | TacFirst l ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacFirst")) @@
+      Tacticals.tclFIRST (List.map (interp_tactic ist) l)
+  | TacSolve l ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacSolve")) @@
+      Tacticals.tclSOLVE (List.map (interp_tactic ist) l)
+  | TacArg _ ->
+    val_interp (ensure_loc loc ist) tac (fun v -> tactic_of_tagged_value ist v)
+  | TacSelect (sel, tac) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacSelect")) @@
+      Goal_select.tclSELECT sel (interp_tactic ist tac)
 
   (* For extensions *)
-  | TacAlias (s, l) ->
-      debug_tacinterp (fun () -> Pp.(str "TacAlias"));
-      let alias = Tacenv.interp_alias s in
-      let len1 = List.length alias.alias_args in
-      let len2 = List.length l in
-      if len1 = len2 then
+  | TacAlias (s, args) ->
+    debug_tacinterp (fun () -> Pp.(str "TacAlias"));
+    let s_interp = Tacenv.interp_alias s in
+    let len1 = List.length s_interp.alias_args in
+    let len2 = List.length args in
+    if len1 = len2 then
+      let arg_late_args = args |> List.map (fun _ -> new_late_arg ()) in
+      (List.combine args arg_late_args |> Proofview.Monad.List.iter (fun (arg, arg_late_arg) ->
+        populate_late_arg arg_late_arg (CAst.make ?loc (TacArg arg))
+      )) <*>
+      populate_current_late_arg ist
+        (CAst.make (TacAlias (s, arg_late_args |> List.map glob_late_arg_tac_arg))) <*>
+      tag_print ist (Proofview_monad.Info.Alias (Pptactic.pr_alias_key s)) @@
         Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
-        let lr_ftactic = l |> Ftactic.List.map (interp_tacarg_ftactic ist) in
-        let tac_ftactic =
+        let tac_f =
           let (>>=) = Ftactic.bind in
-          lr_ftactic >>= fun lr ->
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          (List.combine args arg_late_args |> Ftactic.List.fold_left (fun (deferred_id, args_interp) (arg, arg_late_arg) ->
+            interp_tacarg_ftactic deferred_id (set_current_late_arg ist arg_late_arg) arg >>= fun arg_interp ->
+            Ftactic.return (arg_interp.Proofview.Tagged.deferred_id, arg_interp.Proofview.Tagged.v :: args_interp)
+          ) (deferred_id, [])) >>= fun (deferred_id, args_interp) ->
+          let args_interp = List.rev args_interp in
           let trace = push_trace (loc, LtacNotationCall s) ist in
-          let lfun = List.fold_right2 Id.Map.add alias.alias_args lr ist.lfun in
+          let lfun = List.fold_right2 Id.Map.add s_interp.alias_args args_interp ist.lfun in
           let ist = {lfun; poly; extra = add_extra_loc loc (add_extra_trace trace ist.extra)} in
-          val_interp_ftactic ist alias.alias_body >>= fun v ->
-          let tac = tactic_of_value ist v in
-          Ftactic.return (lr, tac) in
-        Ftactic.run (Ftactic.with_env tac_ftactic) (fun (env, (lr, tac)) ->
-          Proofview.tclEVARMAP >>= fun sigma ->
-          (* spiwack: this use of [tag_tactic] is not robust to a
-             change of implementation of [Ftactic]. In such a situation,
-             some more elaborate solution will have to be used. *)
-          Proofview.Trace.tag_tactic
-            (fun () -> Pptactic.pr_alias (print_top_val env sigma) 0 s lr)
-            tac
-        )
-      else
-        let info = Exninfo.reify () in
-        Tacticals.tclZEROMSG ~info
-          (str "Arguments length mismatch: expected " ++ int len1 ++ str ", found " ++ int len2)
+          val_interp_ftactic deferred_id ist s_interp.alias_body >>= fun v ->
+          let tac_interp = tactic_of_tagged_value ist v in
+          Ftactic.return tac_interp in
+        Ftactic.run tac_f (fun tac_interp -> tac_interp)
+    else
+      let info = Exninfo.reify () in
+      Tacticals.tclZEROMSG ~info
+        (str "Arguments length mismatch: expected " ++ int len1 ++ str ", found " ++ int len2)
 
-  | TacML (opn, l) ->
-      debug_tacinterp (fun () -> Pp.(str "TacML"));
-      Proofview.tclENV >>= fun env ->
-      let trace = push_trace (Loc.tag ?loc @@ LtacMLCall tac) ist in
-      let ist = {ist with extra = TacStore.set ist.extra f_trace trace} in
-      let lr_ftactic = l |> Ftactic.List.map_right (interp_tacarg_ftactic ist) in
-      let tac = Tacenv.interp_ml_tactic opn in
-      Ftactic.run (Ftactic.with_env lr_ftactic) (fun (env, lr) ->
+  | TacML (opn, args) ->
+    debug_tacinterp (fun () -> Pp.(str "TacML"));
+    let trace = push_trace (Loc.tag ?loc @@ LtacMLCall tac) ist in
+    let ist = {ist with extra = TacStore.set ist.extra f_trace trace} in
+    let arg_late_args = args |> List.map (fun _ -> new_late_arg ()) in
+    (List.combine args arg_late_args |> Proofview.Monad.List.iter (fun (arg, arg_late_arg) ->
+      populate_late_arg arg_late_arg (CAst.make ?loc (TacArg arg))
+    )) <*>
+    populate_current_late_arg ist
+      (CAst.make (TacML (opn, arg_late_args |> List.map glob_late_arg_tac_arg))) <*>
+    tag_print ist (Proofview_monad.Info.ML (Pptactic.pr_extend_name opn)) @@
+      let opn_interp = Tacenv.interp_ml_tactic opn in
+      let tac_f =
+        let (>>=) = Ftactic.bind in
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        (List.combine args arg_late_args |> Ftactic.List.fold_left (fun (deferred_id, args_interp) (arg, arg_late_arg) ->
+          interp_tacarg_ftactic deferred_id (set_current_late_arg ist arg_late_arg) arg >>= fun arg_interp ->
+          Ftactic.return (arg_interp.Proofview.Tagged.deferred_id, arg_interp.Proofview.Tagged.v :: args_interp)
+        ) (deferred_id, [])) >>= fun (deferred_id, args_interp) ->
+        let args_interp = List.rev args_interp in
         let (stack, _) = trace in
-        Proofview.tclEVARMAP >>= fun sigma ->
-        Proofview.Trace.tag_tactic
-          (fun () -> Pptactic.pr_extend (print_top_val env sigma) 0 opn lr)
-          (catch_error_tac_loc loc stack (tac lr ist))
-      )
+        let tac_interp = Proofview.Trace.tag_deferred_contents deferred_id (catch_error_tac_loc loc stack (opn_interp args_interp ist)) in
+        Ftactic.return tac_interp in
+      Ftactic.run tac_f (fun tac_interp -> tac_interp) in
+  wrap_populate_late_arg top_late_arg tac tac_interp
 
-and force_vrec_ftactic ist v : Val.t Ftactic.t =
+and force_vrec_ftactic deferred_id ist v : TaggedVal.t Ftactic.t =
   if has_type v (topwit wit_tacvalue) then
     let v = to_tacvalue v in
     match v with
-    | VRec (lfun, body) -> val_interp_ftactic {ist with lfun = !lfun} body
-    | v -> Ftactic.return (of_tacvalue v)
-  else Ftactic.return v
+    | VRec (lfun, body) -> val_interp_ftactic deferred_id {ist with lfun = !lfun} body
+    | v -> Ftactic.return (TaggedVal.make deferred_id (of_tacvalue v))
+  else
+    Ftactic.return (TaggedVal.make deferred_id v)
 
-and interp_ltac_reference_ftactic ?loc' mustbetac ist r : Val.t Ftactic.t =
+and interp_ltac_reference_ftactic ?loc' mustbetac deferred_id ist r : TaggedVal.t Ftactic.t =
   debug_tacinterp (fun () -> Pp.(str "interp_ltac_reference_ftactic " ++ try Pptactic.pr_glob_tactic_arg (Global.env ()) (Evd.from_env (Global.env ())) (Reference r) with e when CErrors.noncritical e -> str "!?!"));
   match r with
   | ArgVar {loc; v = id} ->
       let (>>=) = Ftactic.bind in
-      let v =
-        ist.lfun |> Id.Map.find_opt id |> Option.default (in_gen (topwit wit_hyp) id) in
-      force_vrec_ftactic ist v >>= fun v ->
-      Ftactic.lift (propagate_trace ist loc id v) >>= fun v ->
-      if mustbetac then Ftactic.return (coerce_to_tactic loc id v) else Ftactic.return v
+      Proofview.Trace.tag_deferred_contents deferred_id (
+        let v =
+          ist.lfun |> Id.Map.find_opt id |> Option.default (in_gen (topwit wit_hyp) id) in
+        populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, Genarg.in_gen (glbwit wit_value) v)))) <*>
+        tag_print ist (Proofview_monad.Info.Builtin (Pp.str "ArgVar")) (
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          force_vrec_ftactic deferred_id ist v >>= fun v ->
+          Ftactic.lift (propagate_trace ist loc id v) >>= fun v ->
+          if mustbetac then Ftactic.return (coerce_to_tactic loc id v) else Ftactic.return v
+        )
+      )
   | ArgArg (loc, r) ->
       Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
       let ids = extract_ids [] ist.lfun Id.Set.empty in
@@ -1287,53 +1375,112 @@ and interp_ltac_reference_ftactic ?loc' mustbetac ist r : Val.t Ftactic.t =
       let (stack, _) = trace in
       do_profile stack ~count_call:false
         (catch_error_tac_loc (* loc for interpretation *) loc stack
-          (val_interp_ftactic ~appl ist (Tacenv.interp_ltac r)))
+          (val_interp_ftactic ~appl deferred_id ist (Tacenv.interp_ltac r)))
 
-and interp_tacarg_ftactic ist arg : Val.t Ftactic.t =
+and interp_tacarg_ftactic deferred_id ist arg : TaggedVal.t Ftactic.t =
   debug_tacinterp (fun () -> Pp.(str "interp_tacarg_ftactic " ++ try Pptactic.pr_glob_tactic_arg (Global.env ()) (Evd.from_env (Global.env ())) arg with e when CErrors.noncritical e -> str "!?!"));
+  let (>>=) = Ftactic.bind in
   match arg with
-  | TacGeneric (_, arg) -> interp_genarg ist arg
-  | Reference r -> interp_ltac_reference_ftactic false ist r
+  | TacGeneric (_, arg) -> interp_genarg deferred_id ist arg
+  | Reference r ->
+    Proofview.Trace.tag_deferred_contents deferred_id (
+      populate_current_late_arg ist (CAst.make (TacArg (Reference r))) <*>
+      tag_print ist (Proofview_monad.Info.Builtin (Pp.str "Reference")) (
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        interp_ltac_reference_ftactic false deferred_id ist r
+      )
+    )
   | ConstrMayEval c ->
+    Proofview.Trace.tag_deferred_contents deferred_id (
       Ftactic.enter begin fun gl ->
         let sigma = project gl in
         let env = Proofview.Goal.env gl in
         let (sigma, c_interp) = interp_constr_may_eval ist env sigma c in
-        Proofview.tclTHEN
-          (Proofview.Unsafe.tclEVARS sigma)
-          (Ftactic.return (Value.of_constr c_interp))
+        Proofview.Unsafe.tclEVARS sigma <*>
+        let c_interp_glob = Detyping.detype Detyping.Now Id.Set.empty env sigma c_interp, None in
+        populate_current_late_arg ist (CAst.make (TacArg (ConstrMayEval (ConstrTerm c_interp_glob)))) <*>
+        tag_print ist (Proofview_monad.Info.Builtin (Pp.str "ConstrMayEval")) (
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          Ftactic.return (TaggedVal.make deferred_id (Value.of_constr c_interp))
+        )
       end
+    )
   | TacCall {v = (r, [])} ->
-      interp_ltac_reference_ftactic true ist r
-  | TacCall {loc; v = (f, l)} ->
-      let (>>=) = Ftactic.bind in
-      interp_ltac_reference_ftactic true ist f >>= fun fv ->
-      Ftactic.List.map (fun a -> interp_tacarg_ftactic ist a) l >>= fun largs ->
-      interp_app loc ist fv largs
+    Proofview.Trace.tag_deferred_contents deferred_id (
+      populate_current_late_arg ist (CAst.make (TacArg (TacCall (CAst.make (r, []))))) <*>
+      tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacCall")) (
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        interp_ltac_reference_ftactic true deferred_id ist r
+      )
+    )
+  | TacCall {loc; v = (f, args)} ->
+    Proofview.Trace.tag_deferred_contents deferred_id (
+      tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacCall")) (
+        let f_late_arg = new_late_arg () in
+        populate_late_arg f_late_arg (CAst.make (TacArg (Reference f))) <*>
+        let arg_late_args = args |> List.map (fun _ -> new_late_arg ()) in
+        (List.combine args arg_late_args |> Proofview.Monad.List.iter (fun (arg, arg_late_arg) ->
+          populate_late_arg arg_late_arg (CAst.make ?loc (TacArg arg))
+        )) <*>
+        populate_current_late_arg ist
+          (CAst.make (TacArg (TacCall (
+            CAst.make (ArgVar (CAst.make (Id.of_string_unchecked "")),
+            (f_late_arg :: arg_late_args) |> List.map glob_late_arg_tac_arg
+          ))))) <*>
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        interp_ltac_reference_ftactic true deferred_id (set_current_late_arg ist f_late_arg) f >>= fun f_interp ->
+        (List.combine args arg_late_args |> Ftactic.List.fold_left (fun (deferred_id, args_interp) (arg, arg_late_arg) ->
+          interp_tacarg_ftactic deferred_id (set_current_late_arg ist arg_late_arg) arg >>= fun arg_interp ->
+          Ftactic.return (arg_interp.Proofview.Tagged.deferred_id, arg_interp.Proofview.Tagged.v :: args_interp)
+        ) (f_interp.Proofview.Tagged.deferred_id, [])) >>= fun (deferred_id, args_interp) ->
+        let args_interp = List.rev args_interp in
+        interp_app loc deferred_id ist f_interp.Proofview.Tagged.v args_interp
+      )
+    )
   | TacFreshId l ->
+    Proofview.Trace.tag_deferred_contents deferred_id (
       Ftactic.enter begin fun gl ->
         let id = interp_fresh_id ist (pf_env gl) (project gl) l in
-        Ftactic.return (in_gen (topwit wit_intro_pattern) (CAst.make @@ IntroNaming (IntroIdentifier id)))
+        populate_current_late_arg ist (CAst.make (TacArg (Reference (ArgVar (CAst.make id))))) <*>
+        tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacFreshId")) (
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          Ftactic.return (
+            TaggedVal.make
+              deferred_id
+              (in_gen (topwit wit_intro_pattern) (CAst.make @@ IntroNaming (IntroIdentifier id)))
+          )
+        )
       end
+    )
   | TacPretype c ->
+    Proofview.Trace.tag_deferred_contents deferred_id (
       Ftactic.enter begin fun gl ->
         let sigma = Proofview.Goal.sigma gl in
         let env = Proofview.Goal.env gl in
-        let c = interp_uconstr ist env sigma c in
-        let (sigma, c) = type_uconstr ist c env sigma in
-        Proofview.tclTHEN
-          (Proofview.Unsafe.tclEVARS sigma)
-          (Ftactic.return (Value.of_constr c))
+        let c_interp = interp_uconstr ist env sigma c in
+        let (sigma, c_interp) = type_uconstr ist c_interp env sigma in
+        Proofview.Unsafe.tclEVARS sigma <*>
+        let c_interp_glob = Detyping.detype Detyping.Now Id.Set.empty env sigma c_interp, None in
+        populate_current_late_arg ist (CAst.make (TacArg (ConstrMayEval (ConstrTerm c_interp_glob)))) <*>
+        tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacPretype")) (
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          Ftactic.return (TaggedVal.make deferred_id (Value.of_constr c_interp))
+        )
       end
+    )
   | TacNumgoals ->
-      Ftactic.lift (
-        Proofview.numgoals >>= fun i ->
-        Proofview.tclUNIT (Value.of_int i)
+    Proofview.Trace.tag_deferred_contents deferred_id (
+      Ftactic.lift Proofview.numgoals >>= fun n ->
+      populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, GenArg (glbwit wit_int, n))))) <*>
+      tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacNumgoals")) (
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        Ftactic.return (TaggedVal.make deferred_id (Value.of_int n))
       )
-  | Tacexp t -> val_interp_ftactic ist t
+    )
+  | Tacexp t -> val_interp_ftactic deferred_id ist t
 
 (* Interprets an application node *)
-and interp_app loc ist fv largs : Val.t Ftactic.t =
+and interp_app loc deferred_id ist fv largs : TaggedVal.t Ftactic.t =
   Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
   let (>>=) = Ftactic.bind in
   let fail ~info = Tacticals.tclZEROMSG ~info (str "Illegal tactic application.") in
@@ -1363,7 +1510,7 @@ and interp_app loc ist fv largs : Val.t Ftactic.t =
                 } in
               let (stack, _) = trace in
               do_profile stack ~count_call:false
-                (catch_error_tac_loc loc stack (val_interp_ftactic (ensure_loc loc ist) body)) >>= fun v ->
+                (catch_error_tac_loc loc stack (val_interp_ftactic deferred_id (ensure_loc loc ist) body)) >>= fun v ->
               Ftactic.return (name_vfun (push_appl appl largs) v)
             end
             begin fun (e, info) ->
@@ -1374,17 +1521,24 @@ and interp_app loc ist fv largs : Val.t Ftactic.t =
         (* No errors happened, we propagate the trace *)
         let v = append_trace trace v in
         let call_debug env =
-          Proofview.tclLIFT (debugging_step ist (fun () -> str"evaluation returns"++fnl()++pr_value env v)) in
+          Proofview.tclLIFT (debugging_step ist (fun () -> str"evaluation returns"++fnl()++pr_value env v.Proofview.Tagged.v)) in
         begin
           let open Genprint in
-          match generic_val_print v with
+          match generic_val_print v.Proofview.Tagged.v with
           | TopPrinterBasic _ -> call_debug None
           | TopPrinterNeedsContext _ | TopPrinterNeedsContextAndLevel _ ->
              Proofview.Goal.enter (fun gl -> call_debug (Some (pf_env gl,project gl)))
         end <*>
-        if List.is_empty lval then Ftactic.return v else interp_app loc ist v lval
+        if List.is_empty lval then
+          Ftactic.return v
+        else
+          interp_app loc v.Proofview.Tagged.deferred_id ist v.Proofview.Tagged.v lval
       else
-        Ftactic.return (of_tacvalue (VFun(push_appl appl largs,trace,loc,newlfun,lvar,body)))
+        Ftactic.return (
+          TaggedVal.make
+            deferred_id
+            (of_tacvalue (VFun(push_appl appl largs,trace,loc,newlfun,lvar,body)))
+        )
     | (VFun(appl,trace,_,olfun,[],body)) ->
       let extra_args = List.length largs in
       let info = Exninfo.reify () in
@@ -1402,21 +1556,28 @@ and interp_app loc ist fv largs : Val.t Ftactic.t =
 
 (* Gives the tactic corresponding to the tactic value *)
 and tactic_of_value ist vle =
-  debug_tacinterp (fun () -> Pp.(str "tactic_of_value " ++ try pr_generic vle with e when CErrors.noncritical e -> str "!?!"));
+  debug_tacinterp (fun () -> Pp.(str "tactic_of_value " ++ try (
+    let Val.Dyn (tag, _) = vle in
+    let pr_v =
+      let env = Global.env () in
+      let sigma = Evd.from_env env in
+      Pptactic.pr_value ~context:(env, sigma) Pptactic.ltop vle in
+    str "<" ++ Val.pr tag ++ str ":(" ++ pr_v ++ str ")>"
+  ) with e when CErrors.noncritical e -> str "!?!"));
   if has_type vle (topwit wit_tacvalue) then
   match to_tacvalue vle with
   | VFun (appl,trace,loc,lfun,[],t) ->
     Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
       let ist = {
-        lfun = lfun;
+        lfun;
         poly;
         (* todo: debug stack needs "trace" but that gives incorrect results for profiling
            Couldn't figure out how to make them play together.  Currently no way both can
            be enabled. Perhaps profiling should be redesigned as suggested in profile_ltac.mli *)
         extra = TacStore.set ist.extra f_trace (if !Flags.profile_ltac then ([],[]) else trace); } in
-      let tac = name_if_glob appl (eval_tactic_ist ist t) in
+      let t_interp = eval_tactic_ist ist t in
       let (stack, _) = trace in
-      do_profile stack (catch_error_tac_loc loc stack tac)
+      do_profile stack (catch_error_tac_loc loc stack t_interp)
   | VFun (appl,(stack,_),loc,vmap,vars,_) ->
      let tactic_nm =
        match appl with
@@ -1461,53 +1622,76 @@ and tactic_of_value ist vle =
     let info = Exninfo.reify () in
     Tacticals.tclZEROMSG ~info (str "Expression does not evaluate to a tactic (got a " ++ str name ++ str ").")
 
+and tactic_of_tagged_value ist vle =
+  Proofview.Trace.tag_deferred_contents vle.Proofview.Tagged.deferred_id (tactic_of_value ist vle.Proofview.Tagged.v)
+
 (* Interprets the clauses of a recursive LetIn *)
-and interp_letrec ist llc u =
-  Proofview.tclUNIT () >>= fun () -> (* delay for the effects of [lref], just in case. *)
-  let lref = ref ist.lfun in
-  let fold accu ({v=na}, b) =
-    let v = of_tacvalue (VRec (lref, CAst.make (TacArg b))) in
-    Name.fold_right (fun id -> Id.Map.add id v) na accu
-  in
-  let lfun = List.fold_left fold ist.lfun llc in
-  let () = lref := lfun in
-  let ist = { ist with lfun } in
-  val_interp_ftactic ist u
+and interp_letrec deferred_id ist llc u =
+  Proofview.Trace.tag_deferred_contents deferred_id (
+    populate_current_late_arg ist (CAst.make (TacLetIn (true, llc, u))) <*>
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacLetIn")) (
+      let lref = ref ist.lfun in
+      let fold accu ({v = na}, b) =
+        let v = of_tacvalue (VRec (lref, CAst.make (TacArg b))) in
+        Name.fold_right (fun id -> Id.Map.add id v) na accu in
+      let lfun = List.fold_left fold ist.lfun llc in
+      lref := lfun;
+      let ist = {ist with lfun} in
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      val_interp_ftactic deferred_id ist u
+    )
+  )
 
 (* Interprets the clauses of a LetIn *)
-and interp_letin ist llc u =
+and interp_letin deferred_id ist llc u =
   let (>>=) = Ftactic.bind in
-  let rec fold lfun = function
+  let rec fold deferred_id ist = function
   | [] ->
-    let ist = { ist with lfun } in
-    val_interp_ftactic ist u
-  | ({v = na}, body) :: defs ->
-    interp_tacarg_ftactic ist body >>= fun v ->
-    fold (Name.fold_right (fun id -> Id.Map.add id v) na lfun) defs in
-  fold ist.lfun llc
+    val_interp_ftactic deferred_id ist u
+  | (name, body) :: defs ->
+    Proofview.Trace.tag_deferred_contents deferred_id (
+      let body_late_arg = new_late_arg () in
+      populate_late_arg body_late_arg (CAst.make (TacArg body)) <*>
+      populate_current_late_arg ist
+        (CAst.make (TacLetIn (false, (name, glob_late_arg_tac_arg body_late_arg) :: defs, u))) <*>
+      tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacLetIn")) (
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        interp_tacarg_ftactic deferred_id (set_current_late_arg ist body_late_arg) body >>= fun body_interp ->
+        fold body_interp.deferred_id {ist with lfun = Name.fold_right (fun id -> Id.Map.add id body_interp.v) name.v ist.lfun} defs
+      )
+    ) in
+  fold deferred_id ist llc
 
 (** [interp_match_success lz ist succ] interprets a single matching success
     (of type {!Tactic_matching.t}). *)
-and interp_match_success ist { Tactic_matching.subst ; context ; terms ; lhs } =
+and interp_match_success deferred_id ist { Tactic_matching.subst ; context ; terms ; lhs } =
   Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
   let (>>=) = Ftactic.bind in
   let lctxt = Id.Map.map interp_context context in
   let hyp_subst = Id.Map.map Value.of_constr terms in
   let lfun = extend_values_with_bindings subst (lctxt +++ hyp_subst +++ ist.lfun) in
   let ist = { ist with lfun } in
-  val_interp_ftactic ist lhs >>= fun v ->
-  if has_type v (topwit wit_tacvalue) then match to_tacvalue v with
+  val_interp_ftactic deferred_id ist lhs >>= fun v ->
+  if has_type v.Proofview.Tagged.v (topwit wit_tacvalue) then match to_tacvalue v.Proofview.Tagged.v with
   | VFun (appl,trace,loc,lfun,[],t) ->
+    Proofview.Trace.tag_deferred_contents v.Proofview.Tagged.deferred_id (
       let ist =
-        { lfun = lfun
+        { lfun
         ; poly
         ; extra = TacStore.set ist.extra f_trace trace
         } in
       let tac = eval_tactic_ist ist t in
-      let dummy = VFun (appl, extract_trace ist, loc, Id.Map.empty, [],
-        CAst.make (TacId [])) in
       let (stack, _) = trace in
-      catch_error_tac stack (tac <*> Ftactic.return (of_tacvalue dummy))
+      catch_error_tac stack (
+        Ftactic.lift tac >>= fun () ->
+        populate_current_late_arg ist (CAst.make (TacId [])) <*>
+        tag_print {ist with lfun = Id.Map.empty} (Proofview_monad.Info.Builtin (Pp.str "interp_match_success")) (
+          let dummy = VFun (appl, extract_trace ist, loc, Id.Map.empty, [], CAst.make (TacId [])) in
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          Ftactic.return (TaggedVal.make deferred_id (of_tacvalue dummy))
+        )
+      )
+    )
   | _ -> Ftactic.return v
   else Ftactic.return v
 
@@ -1516,7 +1700,7 @@ and interp_match_success ist { Tactic_matching.subst ; context ; terms ; lhs } =
     matching of successes [s]. If [lz] is set to true, then only the
     first success is considered, otherwise further successes are tried
     if the left-hand side fails. *)
-and interp_match_successes lz ist s =
+and interp_match_successes lz deferred_id ist s =
    let general =
      let open Tacticals in
      let break (e, info) = match e with
@@ -1524,7 +1708,7 @@ and interp_match_successes lz ist s =
        | FailError (n, s) -> Some (FailError (pred n, s), info)
        | _ -> None
      in
-     Proofview.tclBREAK break s >>= fun ans -> interp_match_success ist ans
+     Proofview.tclBREAK break s >>= fun ans -> interp_match_success deferred_id ist ans
    in
     match lz with
     | General ->
@@ -1533,103 +1717,151 @@ and interp_match_successes lz ist s =
       begin
         (* Only keep the first matching result, we don't backtrack on it *)
         let s = Proofview.tclONCE s in
-        s >>= fun ans -> interp_match_success ist ans
+        s >>= fun ans -> interp_match_success deferred_id ist ans
       end
     | Once ->
         (* Once a tactic has succeeded, do not backtrack anymore *)
         Proofview.tclONCE general
 
 (* Interprets the Match expressions *)
-and interp_match ist lz constr lmr =
+and interp_match deferred_id ist lz constr lmr =
   let (>>=) = Ftactic.bind in
-  begin wrap_error
-    (interp_ltac_constr_ftactic ist constr)
-    begin function
-      | (e, info) ->
-          Proofview.tclLIFT (debugging_exception_step ist true e
-          (fun () -> str "evaluation of the matched expression")) <*>
-          Proofview.tclZERO ~info e
-    end
-  end >>= fun constr ->
-  Ftactic.enter begin fun gl ->
-    let sigma = project gl in
-    let env = Proofview.Goal.env gl in
-    let ilr = read_match_rule (extract_ltac_constr_values ist env) ist env sigma lmr in
-    interp_match_successes lz ist (Tactic_matching.match_term env sigma constr ilr)
-  end
+  Proofview.Trace.tag_deferred_contents deferred_id (
+    let constr_late_arg = new_late_arg () in
+    populate_late_arg constr_late_arg constr <*>
+    populate_current_late_arg ist
+      (CAst.make (TacMatch (lz, glob_late_arg_tac constr_late_arg, lmr))) <*>
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacMatch")) (
+      Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      begin wrap_error
+        (interp_ltac_constr_ftactic deferred_id (set_current_late_arg ist constr_late_arg) constr)
+        begin function
+          | (e, info) ->
+              Proofview.tclLIFT (debugging_exception_step ist true e
+              (fun () -> str "evaluation of the matched expression")) <*>
+              Proofview.tclZERO ~info e
+        end
+      end >>= fun constr_interp ->
+      Proofview.Trace.tag_deferred_contents constr_interp.deferred_id (
+        Ftactic.enter begin fun gl ->
+          let sigma = project gl in
+          let env = Proofview.Goal.env gl in
+          let ilr = read_match_rule (extract_ltac_constr_values ist env) ist env sigma lmr in
+          Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+          interp_match_successes lz deferred_id ist (Tactic_matching.match_term env sigma constr_interp.v ilr) >>= fun r ->
+          Ftactic.return ~distribute:Ftactic.distribute_tagged r
+        end
+      )
+    )
+  )
 
 (* Interprets the Match Context expressions *)
-and interp_match_goal ist lz lr lmr =
-    Ftactic.enter begin fun gl ->
-      let sigma = project gl in
-      let env = Proofview.Goal.env gl in
-      let hyps = Proofview.Goal.hyps gl in
-      let hyps = if lr then List.rev hyps else hyps in
-      let concl = Proofview.Goal.concl gl in
-      let ilr = read_match_rule (extract_ltac_constr_values ist env) ist env sigma lmr in
-      interp_match_successes lz ist (Tactic_matching.match_goal env sigma hyps concl ilr)
-    end
+and interp_match_goal deferred_id ist lz lr lmr =
+  let (>>=) = Ftactic.bind in
+  Proofview.Trace.tag_deferred_contents deferred_id (
+    populate_current_late_arg ist (CAst.make (TacMatchGoal (lz, lr, lmr))) <*>
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacMatch")) (
+      Ftactic.enter begin fun gl ->
+        let sigma = project gl in
+        let env = Proofview.Goal.env gl in
+        let hyps = Proofview.Goal.hyps gl in
+        let hyps = if lr then List.rev hyps else hyps in
+        let concl = Proofview.Goal.concl gl in
+        let ilr = read_match_rule (extract_ltac_constr_values ist env) ist env sigma lmr in
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        interp_match_successes lz deferred_id ist (Tactic_matching.match_goal env sigma hyps concl ilr) >>= fun r ->
+        Ftactic.return ~distribute:Ftactic.distribute_tagged r
+      end
+    )
+  )
 
 (* Interprets extended tactic generic arguments *)
-and interp_genarg ist x : Val.t Ftactic.t =
+and interp_genarg deferred_id ist x : TaggedVal.t Ftactic.t =
     let (>>=) = Ftactic.bind in
     (* Ad-hoc handling of some types. *)
     let tag = genarg_tag x in
     if argument_type_eq tag (unquote (topwit (wit_list wit_hyp))) then
-      interp_genarg_var_list ist x
+      interp_genarg_var_list deferred_id ist x
     else if argument_type_eq tag (unquote (topwit (wit_list wit_constr))) then
-      interp_genarg_constr_list ist x
+      interp_genarg_constr_list deferred_id ist x
     else
     let GenArg (Glbwit wit, x) = x in
     match wit with
     | ListArg wit ->
-      let map x = interp_genarg ist (Genarg.in_gen (glbwit wit) x) in
-      Ftactic.List.map map x >>= fun l ->
-      Ftactic.return (Val.Dyn (Val.typ_list, l))
+      let elements = x in
+      Proofview.Trace.tag_deferred_contents deferred_id (
+        let elements_late_args = elements |> List.map (fun _ -> new_late_arg ()) in
+        (List.combine elements elements_late_args |> Proofview.Monad.List.iter (fun (element, element_late_arg) ->
+          populate_late_arg element_late_arg (CAst.make (TacArg (TacGeneric (None, GenArg (Glbwit wit, element)))))
+        )) <*>
+        populate_current_late_arg ist
+          (CAst.make (TacArg (TacGeneric (None, GenArg (Glbwit (ListArg wit_late_arg), elements_late_args))))) <*>
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        (List.combine elements elements_late_args |> Ftactic.List.fold_left (fun (deferred_id, elements) (element, element_late_arg) ->
+          interp_genarg deferred_id (set_current_late_arg ist element_late_arg) (Genarg.in_gen (glbwit wit) element) >>= fun element_interp ->
+          Ftactic.return (element_interp.Proofview.Tagged.deferred_id, element_interp.Proofview.Tagged.v :: elements)
+        ) (deferred_id, [])) >>= fun (deferred_id, elements_interp) ->
+        let elements_interp = List.rev elements_interp in
+        Ftactic.return (TaggedVal.make deferred_id (Val.Dyn (Val.typ_list, elements_interp)))
+      )
     | OptArg wit ->
       begin match x with
-      | None -> Ftactic.return (Val.Dyn (Val.typ_opt, None))
-      | Some x ->
-        interp_genarg ist (Genarg.in_gen (glbwit wit) x) >>= fun x ->
-        Ftactic.return (Val.Dyn (Val.typ_opt, Some x))
+      | None -> Ftactic.return (TaggedVal.make deferred_id (Val.Dyn (Val.typ_opt, None)))
+      | Some x' ->
+        interp_genarg deferred_id ist (Genarg.in_gen (glbwit wit) x') >>= fun x'_interp ->
+        Ftactic.return (
+          TaggedVal.make
+            x'_interp.Proofview.Tagged.deferred_id
+            (Val.Dyn (Val.typ_opt, Some x'_interp.Proofview.Tagged.v))
+        )
       end
-    | PairArg (wit1, wit2) ->
+    | PairArg (wit_p, wit_q) ->
       let (p, q) = x in
-      interp_genarg ist (Genarg.in_gen (glbwit wit1) p) >>= fun p ->
-      interp_genarg ist (Genarg.in_gen (glbwit wit2) q) >>= fun q ->
-      Ftactic.return (Val.Dyn (Val.typ_pair, (p, q)))
+      Proofview.Trace.tag_deferred_contents deferred_id (
+        let (p_late_arg, q_late_arg) = (new_late_arg (), new_late_arg ()) in
+        populate_late_arg p_late_arg (CAst.make (TacArg (TacGeneric (None, GenArg (Glbwit wit_p, p))))) <*>
+        populate_late_arg p_late_arg (CAst.make (TacArg (TacGeneric (None, GenArg (Glbwit wit_q, q))))) <*>
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        interp_genarg deferred_id (set_current_late_arg ist p_late_arg) (Genarg.in_gen (glbwit wit_p) p) >>= fun p_interp ->
+        interp_genarg p_interp.deferred_id (set_current_late_arg ist p_late_arg) (Genarg.in_gen (glbwit wit_q) q) >>= fun q_interp ->
+        Ftactic.return (TaggedVal.make q_interp.deferred_id (Val.Dyn (Val.typ_pair, (p_interp.Proofview.Tagged.v, q_interp.Proofview.Tagged.v))))
+      )
     | ExtraArg s ->
-      Geninterp.interp wit ist x
+      Geninterp.interp wit deferred_id ist x
 
 (** returns [true] for genargs which have the same meaning
     independently of goals. *)
 
-and interp_genarg_constr_list ist x =
+and interp_genarg_constr_list deferred_id ist x =
+  Proofview.Trace.tag_deferred_contents deferred_id @@
   Ftactic.enter begin fun gl ->
   let env = Proofview.Goal.env gl in
   let sigma = Proofview.Goal.sigma gl in
   let lc = Genarg.out_gen (glbwit (wit_list wit_constr)) x in
   let (sigma,lc) = interp_constr_list ist env sigma lc in
-  let lc = in_list (val_tag wit_constr) lc in
+  Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+  let lc = TaggedVal.make deferred_id (in_list (val_tag wit_constr) lc) in
   Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
   (Ftactic.return lc)
   end
 
-and interp_genarg_var_list ist x =
+and interp_genarg_var_list deferred_id ist x =
+  Proofview.Trace.tag_deferred_contents deferred_id @@
   Ftactic.enter begin fun gl ->
   let env = Proofview.Goal.env gl in
   let sigma = Proofview.Goal.sigma gl in
   let lc = Genarg.out_gen (glbwit (wit_list wit_hyp)) x in
   let lc = interp_hyp_list ist env sigma lc in
-  let lc = in_list (val_tag wit_hyp) lc in
+  Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+  let lc = TaggedVal.make deferred_id (in_list (val_tag wit_hyp) lc) in
   Ftactic.return lc
   end
 
 (* Interprets tactic expressions : returns a "constr" *)
-and interp_ltac_constr_ftactic ist e : EConstr.t Ftactic.t =
+and interp_ltac_constr_ftactic deferred_id ist e : EConstr.t Proofview.Tagged.t Ftactic.t =
   let (>>=) = Ftactic.bind in
   begin wrap_error
-      (val_interp_ftactic ist e)
+      (val_interp_ftactic deferred_id ist e)
       begin function (err, info) -> match err with
         | Not_found ->
             Ftactic.enter begin fun gl ->
@@ -1649,12 +1881,12 @@ and interp_ltac_constr_ftactic ist e : EConstr.t Ftactic.t =
   let env = Proofview.Goal.env gl in
   let sigma = project gl in
   try
-    let cresult = coerce_to_closed_constr env result in
+    let cresult = result |> Proofview.Tagged.map (coerce_to_closed_constr env) in
     Proofview.tclLIFT begin
       debugging_step ist (fun () ->
         Pptactic.pr_glob_tactic env sigma e ++ fnl() ++
           str " has value " ++ fnl() ++
-          pr_econstr_env env sigma cresult)
+          pr_econstr_env env sigma cresult.Proofview.Tagged.v)
     end <*>
     Ftactic.return cresult
   with CannotCoerceTo _ as exn ->
@@ -1663,38 +1895,28 @@ and interp_ltac_constr_ftactic ist e : EConstr.t Ftactic.t =
     let sigma = Proofview.Goal.sigma gl in
     Tacticals.tclZEROMSG ~info
       (str "Must evaluate to a closed term" ++ fnl() ++
-       str "offending expression: " ++ fnl() ++ pr_inspect env sigma e result)
+       str "offending expression: " ++ fnl() ++ pr_inspect env sigma e result.Proofview.Tagged.v)
   end
 
 (** Interprets an expression that evaluates to a constr *)
 and interp_ltac_constr ist c k =
-  Ftactic.run (interp_ltac_constr_ftactic ist c) k
-
-(* Provides a "name" for the trace to atomic tactics *)
-and tag_atomic_tactic ~env tacexpr tac : unit Proofview.tactic =
-  Proofview.tclEVARMAP >>= fun sigma ->
-  Proofview.Trace.tag_tactic
-    (fun () -> Pptactic.pr_atomic_tactic env sigma tacexpr)
-    tac
+  Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+  Ftactic.run (interp_ltac_constr_ftactic deferred_id ist c) k
 
 (* Interprets a primitive tactic *)
 and interp_atomic ist tac : unit Proofview.tactic =
   match tac with
   (* Basic tactics *)
   | TacIntroPattern (ev,l) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacIntroPattern")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
         let l' = interp_intro_pattern_list_as_list ist env sigma l in
-        tag_atomic_tactic ~env
-          (TacIntroPattern (ev,l))
-          (* spiwack: print uninterpreted, not sure if it is the
-             expected behaviour. *)
-          (Tactics.intro_patterns ev l')
+        Tactics.intro_patterns ev l'
       end
   | TacApply (a,ev,cb,cl) ->
-      (* spiwack: until the tactic is in the monad *)
-      Proofview.Trace.tag_tactic (fun () -> Pp.str "<apply>") begin
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacApply")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
@@ -1709,33 +1931,27 @@ and interp_atomic ist tac : unit Proofview.tactic =
               List.fold_right (fun (id,ipat) -> Tactics.apply_delayed_in a ev id l ipat) cl Tacticals.tclIDTAC in
         tac
       end
-      end
   | TacElim (ev,(keep,cb),cbo) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacElim")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
         let sigma, cb = interp_open_constr_with_bindings ist env sigma cb in
         let sigma, cbo = Option.fold_left_map (interp_open_constr_with_bindings ist env) sigma cbo in
-        let named_tac =
-          let tac = Tactics.elim ev keep cb cbo in
-          tag_atomic_tactic ~env (TacElim (ev,(keep,cb),cbo)) tac
-        in
-        Tacticals.tclWITHHOLES ev named_tac sigma
+        let tac = Tactics.elim ev keep cb cbo in
+        Tacticals.tclWITHHOLES ev tac sigma
       end
   | TacCase (ev,(keep,cb)) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacCase")) @@
       Proofview.Goal.enter begin fun gl ->
         let sigma = project gl in
         let env = Proofview.Goal.env gl in
         let sigma, cb = interp_open_constr_with_bindings ist env sigma cb in
-        let named_tac =
-          let tac = Tactics.general_case_analysis ev keep cb in
-          tag_atomic_tactic ~env (TacCase(ev,(keep,cb))) tac
-        in
-        Tacticals.tclWITHHOLES ev named_tac sigma
+        let tac = Tactics.general_case_analysis ev keep cb in
+        Tacticals.tclWITHHOLES ev tac sigma
       end
   | TacMutualFix (id,n,l) ->
-      (* spiwack: until the tactic is in the monad *)
-      Proofview.Trace.tag_tactic (fun () -> Pp.str "<mutual fix>") begin
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacMutualFix")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = pf_env gl in
         let f sigma (id,n,c) =
@@ -1747,23 +1963,21 @@ and interp_atomic ist tac : unit Proofview.tactic =
         Tacticals.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
         (Tactics.mutual_fix (interp_ident ist env sigma id) n l_interp 0)
       end
-      end
   | TacMutualCofix (id,l) ->
-      (* spiwack: until the tactic is in the monad *)
-      Proofview.Trace.tag_tactic (fun () -> Pp.str "<mutual cofix>") begin
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacMutualCofix")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = pf_env gl in
         let f sigma (id,c) =
           let (sigma,c_interp) = interp_type ist env sigma c in
-          sigma , (interp_ident ist env sigma id,c_interp) in
+          sigma , ((interp_ident ist env sigma id),c_interp) in
         let (sigma,l_interp) =
           Evd.MonadR.List.map_right (fun c sigma -> f sigma c) l (project gl)
         in
         Tacticals.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
         (Tactics.mutual_cofix (interp_ident ist env sigma id) l_interp 0)
       end
-      end
   | TacAssert (ev,b,t,ipat,c) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacAssert")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
@@ -1775,22 +1989,18 @@ and interp_atomic ist tac : unit Proofview.tactic =
         in
         let ipat' = interp_intro_pattern_option ist env sigma ipat in
         let tac = Option.map (Option.map (interp_tactic ist)) t in
-        Tacticals.tclWITHHOLES ev
-        (tag_atomic_tactic ~env
-          (TacAssert(ev,b,Option.map (Option.map ignore) t,ipat,c))
-          (Tactics.forward b tac ipat' c)) sigma
+        Tacticals.tclWITHHOLES ev (Tactics.forward b tac ipat' c) sigma
       end
   | TacGeneralize cl ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacGeneralize")) @@
       Proofview.Goal.enter begin fun gl ->
         let sigma = project gl in
         let env = Proofview.Goal.env gl in
         let sigma, cl = interp_constr_with_occurrences_and_name_as_list ist env sigma cl in
-        Tacticals.tclWITHHOLES false
-        (tag_atomic_tactic ~env
-          (TacGeneralize cl)
-          (Generalize.generalize_gen cl)) sigma
+        Tacticals.tclWITHHOLES false (Generalize.generalize_gen cl) sigma
       end
   | TacLetTac (ev,na,c,clp,b,eqpat) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacLetTac")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
@@ -1800,7 +2010,7 @@ and interp_atomic ist tac : unit Proofview.tactic =
         (* We try to fully-typecheck the term *)
           let flags = open_constr_use_classes_flags () in
           let (sigma,c_interp) = interp_open_constr ~flags ist env sigma c in
-          let na = interp_name ist env sigma na in
+          let na = (interp_name ist env sigma na) in
           let let_tac =
             if b then Tactics.pose_tac na c_interp
             else
@@ -1808,10 +2018,7 @@ and interp_atomic ist tac : unit Proofview.tactic =
               let with_eq = Some (true, id) in
               Tactics.letin_tac with_eq na c_interp None Locusops.nowhere
           in
-          Tacticals.tclWITHHOLES ev
-          (tag_atomic_tactic ~env
-            (TacLetTac(ev,na,c_interp,clp,b,eqpat))
-            let_tac) sigma
+          Tacticals.tclWITHHOLES ev let_tac sigma
         else
         (* We try to keep the pattern structure as much as possible *)
           let let_pat_tac b na c cl eqpat =
@@ -1821,14 +2028,12 @@ and interp_atomic ist tac : unit Proofview.tactic =
           in
           let (sigma',c) = interp_pure_open_constr ist env sigma c in
           Tacticals.tclWITHHOLES ev
-          (tag_atomic_tactic ~env
-            (TacLetTac(ev,na,c,clp,b,eqpat))
-              (let_pat_tac b (interp_name ist env sigma na)
-                (Some sigma,c) clp eqpat)) sigma'
+            (let_pat_tac b (interp_name ist env sigma na) (Some sigma,c) clp eqpat) sigma'
       end
 
   (* Derived basic tactics *)
   | TacInductionDestruct (isrec,ev,(l,el)) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacInductionDestruct")) @@
       (* spiwack: some unknown part of destruct needs the goal to be
          prenormalised. *)
       Proofview.Goal.enter begin fun gl ->
@@ -1850,22 +2055,21 @@ and interp_atomic ist tac : unit Proofview.tactic =
         let l,lp = List.split l in
         let sigma,el =
           Option.fold_left_map (interp_open_constr_with_bindings ist env) sigma el in
-        Tacticals.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
-        (tag_atomic_tactic ~env
-          (TacInductionDestruct(isrec,ev,(lp,el)))
-            (Induction.induction_destruct isrec ev (l,el)))
+        Tacticals.tclTHEN
+          (Proofview.Unsafe.tclEVARS sigma)
+          (Induction.induction_destruct isrec ev (l,el))
       end
 
   (* Conversion *)
   | TacReduce (r,cl) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacReduce")) @@
       Proofview.Goal.enter begin fun gl ->
         let (sigma,r_interp) = interp_red_expr ist (pf_env gl) (project gl) r in
         Tacticals.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
         (Tactics.reduce r_interp (interp_clause ist (pf_env gl) (project gl) cl))
       end
   | TacChange (check,None,c,cl) ->
-      (* spiwack: until the tactic is in the monad *)
-      Proofview.Trace.tag_tactic (fun () -> Pp.str "<change>") begin
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacChange")) @@
       Proofview.Goal.enter begin fun gl ->
         let is_onhyps = match cl.onhyps with
           | None | Some [] -> true
@@ -1887,10 +2091,8 @@ and interp_atomic ist tac : unit Proofview.tactic =
         in
         Tactics.change ~check None c_interp (interp_clause ist (pf_env gl) (project gl) cl)
       end
-      end
   | TacChange (check,Some op,c,cl) ->
-      (* spiwack: until the tactic is in the monad *)
-      Proofview.Trace.tag_tactic (fun () -> Pp.str "<change>") begin
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacChange")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
@@ -1910,11 +2112,11 @@ and interp_atomic ist tac : unit Proofview.tactic =
         in
         Tactics.change ~check (Some op) c_interp (interp_clause ist env sigma cl)
       end
-      end
 
 
   (* Equality and inversion *)
   | TacRewrite (ev,l,cl,by) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacRewrite")) @@
       Proofview.Goal.enter begin fun gl ->
         let l' = List.map (fun (b,m,(keep,c)) ->
           let f env sigma =
@@ -1924,14 +2126,11 @@ and interp_atomic ist tac : unit Proofview.tactic =
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
         let cl = interp_clause ist env sigma cl in
-        tag_atomic_tactic ~env
-          (TacRewrite (ev,l,cl,Option.map ignore by))
-          (Equality.general_multi_rewrite ev l' cl
-             (Option.map (fun by -> Tacticals.tclCOMPLETE (interp_tactic ist by),
-               Equality.Naive)
-                by))
+        Equality.general_multi_rewrite ev l' cl
+          (Option.map (fun by -> Tacticals.tclCOMPLETE (interp_tactic ist by), Equality.Naive) by)
       end
   | TacInversion (DepInversion (k,c,ids),hyp) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacInversion")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
@@ -1944,33 +2143,29 @@ and interp_atomic ist tac : unit Proofview.tactic =
         in
         let dqhyps = interp_declared_or_quantified_hypothesis ist env sigma hyp in
         let ids_interp = interp_or_and_intro_pattern_option ist env sigma ids in
-        Tacticals.tclWITHHOLES false
-        (tag_atomic_tactic ~env
-          (TacInversion(DepInversion(k,c_interp,ids),dqhyps))
-          (Inv.dinv k c_interp ids_interp dqhyps)) sigma
+        Tacticals.tclWITHHOLES false (Inv.dinv k c_interp ids_interp dqhyps) sigma
       end
   | TacInversion (NonDepInversion (k,idl,ids),hyp) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacInversion")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
         let hyps = interp_hyp_list ist env sigma idl in
         let dqhyps = interp_declared_or_quantified_hypothesis ist env sigma hyp in
         let ids_interp = interp_or_and_intro_pattern_option ist env sigma ids in
-        tag_atomic_tactic ~env
-          (TacInversion (NonDepInversion (k,hyps,ids),dqhyps))
-          (Inv.inv_clause k ids_interp hyps dqhyps)
+        Inv.inv_clause k ids_interp hyps dqhyps
       end
   | TacInversion (InversionUsing (c,idl),hyp) ->
+    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacInversion")) @@
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
         let (sigma,c_interp) = interp_constr ist env sigma c in
         let dqhyps = interp_declared_or_quantified_hypothesis ist env sigma hyp in
         let hyps = interp_hyp_list ist env sigma idl in
-        Tacticals.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
-        (tag_atomic_tactic ~env
-          (TacInversion (InversionUsing (c_interp,hyps),dqhyps))
-          (Leminv.lemInv_clause dqhyps c_interp hyps))
+        Tacticals.tclTHEN
+          (Proofview.Unsafe.tclEVARS sigma)
+          (Leminv.lemInv_clause dqhyps c_interp hyps)
       end
 
 (* Initial call for interpretation *)
@@ -1983,10 +2178,14 @@ let eval_tactic t =
   if get_debug () <> DebugOff then
     Proofview.tclUNIT () >>= fun () -> (* delay for [default_ist] *)
     Proofview.tclLIFT (db_initialize true) <*>
-    eval_tactic_ist (default_ist ()) t
+    let ist = default_ist () in
+    assign_late_arg print_late_arg top_late_arg <*>
+    eval_tactic_ist ist t
   else
     Proofview.tclUNIT () >>= fun () -> (* delay for [default_ist] *)
-    eval_tactic_ist (default_ist ()) t
+    let ist = default_ist () in
+    assign_late_arg print_late_arg top_late_arg <*>
+    eval_tactic_ist ist t
 
 let eval_tactic_ist ist t =
   Proofview.tclLIFT (db_initialize false) <*>
@@ -2019,9 +2218,9 @@ module Value = struct
     let ist, tac = apply_expr f args in
     eval_tactic_ist ist tac
 
-  let apply_val (f : value) (args: value list) =
+  let apply_val deferred_id (f : value) (args: value list) =
     let ist, tac = apply_expr f args in
-    val_interp_ftactic ist tac
+    val_interp_ftactic deferred_id ist tac
 
 end
 
@@ -2073,14 +2272,15 @@ let ComTactic.Interpreter hide_interp = ComTactic.register_tactic_interpreter "l
 
 let register_interp0 wit f =
   let (>>=) = Ftactic.bind in
-  let interp ist v =
-    f ist v >>= fun v -> Ftactic.return (Val.inject (val_tag wit) v)
+  let interp deferred_id ist v =
+    f deferred_id ist v >>= fun v ->
+    Ftactic.return (TaggedVal.make v.Proofview.Tagged.deferred_id (Val.inject (val_tag wit) v.Proofview.Tagged.v))
   in
   Geninterp.register_interp0 wit interp
 
 let def_intern ist x = (ist, x)
 let def_subst _ x = x
-let def_interp ist x = Ftactic.return x
+let def_interp deferred_id ist x = Ftactic.return (Proofview.Tagged.make deferred_id x)
 
 let declare_uniform t =
   Genintern.register_intern0 t def_intern;
@@ -2102,44 +2302,61 @@ let () =
 let () =
   declare_uniform wit_string
 
-let lift f = (); fun ist x -> Ftactic.enter begin fun gl ->
-  let env = Proofview.Goal.env gl in
-  let sigma = Proofview.Goal.sigma gl in
-  Ftactic.return (f ist env sigma x)
-end
+let lift f = (); fun deferred_id ist x ->
+  let (>>=) = Ftactic.bind in
+  Proofview.Trace.tag_deferred_contents deferred_id (
+    Ftactic.enter (fun gl ->
+      let env = Proofview.Goal.env gl in
+      let sigma = Proofview.Goal.sigma gl in
+      Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Ftactic.return (Proofview.Tagged.make deferred_id (f ist env sigma x))
+    )
+  )
 
-let lifts f = (); fun ist x -> Ftactic.enter begin fun gl ->
-  let env = Proofview.Goal.env gl in
-  let sigma = Proofview.Goal.sigma gl in
-  let (sigma, v) = f ist env sigma x in
-  Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
-    (* FIXME once we don't need to catch side effects *)
-    (Proofview.tclTHEN (Proofview.Unsafe.tclSETENV (Global.env()))
-       (Ftactic.return v))
-end
+let lifts f = (); fun deferred_id ist x ->
+  let (>>=) = Ftactic.bind in
+  Proofview.Trace.tag_deferred_contents deferred_id (
+    Ftactic.enter (fun gl ->
+      let env = Proofview.Goal.env gl in
+      let sigma = Proofview.Goal.sigma gl in
+      let (sigma, v) = f ist env sigma x in
+      Proofview.Unsafe.tclEVARS sigma <*>
+      (* FIXME once we don't need to catch side effects *)
+      Proofview.Unsafe.tclSETENV (Global.env()) <*>
+      Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Ftactic.return (Proofview.Tagged.make deferred_id v)
+    )
+  )
 
-let interp_bindings' ist bl = Ftactic.return begin fun env sigma ->
-  interp_bindings ist env sigma bl
-  end
+let interp_bindings' deferred_id ist bl =
+  Ftactic.return (Proofview.Tagged.make deferred_id (fun env sigma ->
+    interp_bindings ist env sigma bl
+  ))
 
-let interp_constr_with_bindings' ist c = Ftactic.return begin fun env sigma ->
-  interp_constr_with_bindings ist env sigma c
-  end
+let interp_constr_with_bindings' deferred_id ist c =
+  Ftactic.return (Proofview.Tagged.make deferred_id (fun env sigma ->
+    interp_constr_with_bindings ist env sigma c
+  ))
 
-let interp_open_constr_with_bindings' ist c = Ftactic.return begin fun env sigma ->
-  interp_open_constr_with_bindings ist env sigma c
-  end
+let interp_open_constr_with_bindings' deferred_id ist c =
+  Ftactic.return (Proofview.Tagged.make deferred_id (fun env sigma ->
+    interp_open_constr_with_bindings ist env sigma c
+  ))
 
-let interp_destruction_arg' ist c = Ftactic.enter begin fun gl ->
-  Ftactic.return (interp_destruction_arg ist gl c)
-end
+let interp_destruction_arg' deferred_id ist c =
+  Proofview.Trace.tag_deferred_contents deferred_id (
+    Ftactic.enter (fun gl ->
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Ftactic.return (Proofview.Tagged.make deferred_id (interp_destruction_arg ist gl c))
+    )
+  )
 
 let interp_pre_ident ist env sigma s =
   s |> Id.of_string |> interp_ident ist env sigma |> Id.to_string
 
 let () =
-  register_interp0 wit_int_or_var (fun ist n -> Ftactic.return (interp_int_or_var ist n));
-  register_interp0 wit_nat_or_var (fun ist n -> Ftactic.return (interp_int_or_var ist n));
+  register_interp0 wit_int_or_var (fun deferred_id ist n -> Ftactic.return (Proofview.Tagged.make deferred_id (interp_int_or_var ist n)));
+  register_interp0 wit_nat_or_var (fun deferred_id ist n -> Ftactic.return (Proofview.Tagged.make deferred_id (interp_int_or_var ist n)));
   register_interp0 wit_smart_global (lift interp_reference);
   register_interp0 wit_ref (lift interp_reference);
   register_interp0 wit_pre_ident (lift interp_pre_ident);
@@ -2149,7 +2366,7 @@ let () =
   register_interp0 wit_simple_intropattern (lift interp_intro_pattern);
   register_interp0 wit_clause_dft_concl (lift interp_clause);
   register_interp0 wit_constr (lifts interp_constr);
-  register_interp0 wit_tacvalue (fun ist v -> Ftactic.return v);
+  register_interp0 wit_tacvalue (fun deferred_id ist v -> Ftactic.return (Proofview.Tagged.make deferred_id v));
   register_interp0 Redexpr.wit_red_expr (lifts interp_red_expr);
   register_interp0 wit_quant_hyp (lift interp_declared_or_quantified_hypothesis);
   register_interp0 wit_open_constr (lifts interp_open_constr);
@@ -2160,27 +2377,39 @@ let () =
   ()
 
 let () =
-  let interp ist tac = Ftactic.return (Value.of_closure ist tac) in
+  let interp deferred_id ist tac = Ftactic.return (Proofview.Tagged.make deferred_id (Value.of_closure ist tac)) in
   register_interp0 wit_tactic interp
 
 let () =
-  let interp ist tac = eval_tactic_ist ist tac >>= fun () -> Ftactic.return () in
+  let interp deferred_id ist tac =
+    Proofview.Trace.tag_deferred_contents deferred_id (
+      eval_tactic_ist ist tac >>= fun () ->
+      let (>>=) = Ftactic.bind in
+      Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Ftactic.return (Proofview.Tagged.make deferred_id ())
+    ) in
   register_interp0 wit_ltac interp
 
 let () =
-  register_interp0 wit_uconstr (fun ist c -> Ftactic.enter begin fun gl ->
-    Ftactic.return (interp_uconstr ist (Proofview.Goal.env gl) (Tacmach.project gl) c)
-  end)
+  register_interp0 wit_uconstr (fun deferred_id ist c ->
+    Proofview.Trace.tag_deferred_contents deferred_id (
+      Ftactic.enter (fun gl ->
+        Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        Ftactic.return (Proofview.Tagged.make deferred_id (interp_uconstr ist (Proofview.Goal.env gl) (Tacmach.project gl) c))
+      )
+    )
+  )
 
 (***************************************************************************)
 (* Backwarding recursive needs of tactic glob/interp/eval functions *)
 
 let _ =
   let eval ?loc ~poly env sigma tycon tac =
-    let lfun = GlobEnv.lfun env in
-    let extra = TacStore.set TacStore.empty f_debug (get_debug ()) in
-    let ist = { lfun; poly; extra; } in
-    let tac = eval_tactic_ist ist tac in
+    let tac =
+      let lfun = GlobEnv.lfun env in
+      let extra = TacStore.set TacStore.empty f_debug (get_debug ()) in
+      let ist = { lfun; poly; extra; } in
+      eval_tactic_ist ist tac in
     (* EJGA: We should also pass the proof name if desired, for now
        poly seems like enough to get reasonable behavior in practice
      *)

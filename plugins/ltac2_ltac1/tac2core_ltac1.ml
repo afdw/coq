@@ -60,7 +60,9 @@ let () =
   let open Tacexpr in
   let open Locus in
   let k ret =
-    Proofview.tclIGNORE (Tac2val.apply k [Tac2ffi.of_ext val_ltac1 ret])
+    Proofview.Trace.tag_deferred_contents ret.Proofview.Tagged.deferred_id (
+      Proofview.tclIGNORE (Tac2val.apply k [Tac2ffi.of_ext val_ltac1 ret.Proofview.Tagged.v])
+    )
   in
   let fold arg (i, vars, lfun) =
     let id = Id.of_string ("x" ^ string_of_int i) in
@@ -275,13 +277,13 @@ let () =
   (* These are bound names and not relevant *)
   let tac_id = Id.of_string "F" in
   let arg_id = Id.of_string "X" in
-  let interp_fun ist () =
+  let interp_fun deferred_id ist () =
     let tac = cast_typ typ_ltac2 @@ Id.Map.get tac_id ist.Tacinterp.lfun in
     let arg = Id.Map.get arg_id ist.Tacinterp.lfun in
     let tac = Tac2ffi.to_closure tac in
     Tac2val.apply tac [of_ltac1 arg] >>= fun ans ->
     let ans = Tac2ffi.to_ext val_ltac1 ans in
-    Ftactic.return ans
+    Ftactic.return (Geninterp.TaggedVal.make deferred_id ans)
   in
   let () = Geninterp.register_interp0 wit_ltac2_val interp_fun in
   define "ltac1_lambda" (valexpr @-> ret ltac1) @@ fun f ->
@@ -314,7 +316,7 @@ let ltac2_eval =
 let () =
   let open Ltac_plugin in
   let open Tacinterp in
-  let interp ist (ids, tac) = match ids with
+  let interp deferred_id ist (ids, tac) = match ids with
   | [] ->
     (* Evaluate the Ltac2 quotation eagerly *)
     let idtac = Value.of_closure { ist with lfun = Id.Map.empty }
@@ -322,7 +324,7 @@ let () =
     let ist = { env_ist = Id.Map.empty } in
     Tac2interp.interp ist tac >>= fun v ->
     let v = idtac in
-    Ftactic.return v
+    Ftactic.return (Geninterp.TaggedVal.make deferred_id v)
   | _ :: _ ->
     (* Return a closure [@f := {blob} |- fun ids => ltac2_eval(f, ids) ] *)
     (* This name cannot clash with Ltac2 variables which are all lowercase *)
@@ -336,15 +338,15 @@ let () =
     let self = Tac2interp.interp_value { env_ist = Id.Map.empty } self in
     let self = Geninterp.Val.inject (Geninterp.Val.Base typ_ltac2) self in
     let ist = { ist with lfun = Id.Map.singleton self_id self } in
-    Ftactic.return (Value.of_closure ist clos)
+    Ftactic.return (Geninterp.TaggedVal.make deferred_id (Value.of_closure ist clos))
   in
   Geninterp.register_interp0 wit_ltac2in1 interp
 
 let () =
-  let interp ist tac =
+  let interp deferred_id ist tac =
     let ist = { env_ist = Id.Map.empty } in
     Tac2interp.interp ist tac >>= fun v ->
     let v = repr_to ltac1 v in
-    Ftactic.return v
+    Ftactic.return (Geninterp.TaggedVal.make deferred_id v)
   in
   Geninterp.register_interp0 wit_ltac2in1_val interp

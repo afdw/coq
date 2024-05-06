@@ -637,7 +637,10 @@ let solve_remaining_by env sigma holes by =
               ; extra = Geninterp.TacStore.empty } in
     let solve_tac = match tac with
     | Genarg.GenArg (Genarg.Glbwit tag, tac) ->
-      Ftactic.run (Geninterp.interp tag ist tac) (fun _ -> Proofview.tclUNIT ())
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Ftactic.run (Geninterp.interp tag deferred_id ist tac) (fun v ->
+        Proofview.Trace.tag_deferred_contents v.Proofview.Tagged.deferred_id (Proofview.tclUNIT ())
+      )
     in
     let solve_tac = tclCOMPLETE solve_tac in
     let solve sigma evk =

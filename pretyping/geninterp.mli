@@ -58,6 +58,12 @@ val register_val0 : ('raw, 'glb, 'top) genarg_type -> 'top Val.tag option -> uni
     argument, a new fresh tag with the same name as the argument is associated
     to the generic type. *)
 
+module TaggedVal : sig
+  type t = Val.t Proofview.Tagged.t
+
+  val make : Proofview_monad.Info.deferred_id -> Val.t -> t
+end
+
 (** {6 Interpretation functions} *)
 
 module TacStore : Store.S
@@ -67,9 +73,9 @@ type interp_sign =
   ; poly : bool
   ; extra : TacStore.t }
 
-type ('glb, 'top) interp_fun = interp_sign -> 'glb -> 'top Ftactic.t
+type ('glb, 'top) interp_fun = Proofview_monad.Info.deferred_id -> interp_sign -> 'glb -> 'top Ftactic.t
 
-val interp : ('raw, 'glb, 'top) genarg_type -> ('glb, Val.t) interp_fun
+val interp : ('raw, 'glb, 'top) genarg_type -> ('glb, TaggedVal.t) interp_fun
 
 val register_interp0 :
-  ('raw, 'glb, 'top) genarg_type -> ('glb, Val.t) interp_fun -> unit
+  ('raw, 'glb, 'top) genarg_type -> ('glb, TaggedVal.t) interp_fun -> unit
