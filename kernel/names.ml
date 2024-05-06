@@ -61,6 +61,8 @@ struct
     let () = check_valid ~strict:false s in
     String.hcons s
 
+  let of_string_unchecked s = s
+
   let to_string id = id
 
   let print id = str id

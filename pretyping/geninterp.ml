@@ -80,10 +80,18 @@ let register_val0 wit tag =
   in
   ValRepr.register0 wit tag
 
+module TaggedVal = struct
+  type t = Val.t Proofview.Tagged.t
+
+  let make = Proofview.Tagged.make
+  (* let append = Proofview.Tagged.append *)
+end
+
 (** Interpretation functions *)
 
 type interp_sign =
-  { lfun : Val.t Id.Map.t
+  { deferred_id : Proofview_monad.Info.deferred_id
+  ; lfun : Val.t Id.Map.t
   ; poly : bool
   ; extra : TacStore.t }
 
@@ -91,7 +99,7 @@ type ('glb, 'top) interp_fun = interp_sign -> 'glb -> 'top Ftactic.t
 
 module InterpObj =
 struct
-  type ('raw, 'glb, 'top) obj = ('glb, Val.t) interp_fun
+  type ('raw, 'glb, 'top) obj = ('glb, TaggedVal.t) interp_fun
   let name = "interp"
   let default _ = None
 end

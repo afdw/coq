@@ -19,6 +19,7 @@ open Stdarg
 open Tacarg
 open Geninterp
 open Pp
+open Proofview.Notations
 
 exception CannotCoerceTo of string
 
@@ -39,6 +40,16 @@ let (wit_constr_under_binders : (Empty.t, Empty.t, Ltac_pretype.constr_under_bin
   let () = Genprint.register_val_print0 (base_val_typ wit)
              (fun c ->
                Genprint.TopPrinterNeedsContext (fun env sigma -> Printer.pr_constr_under_binders_env env sigma c)) in
+  wit
+
+let (wit_value : (Val.t, Val.t, Val.t) genarg_type) =
+  let wit = Genarg.create_arg "value" in
+  register_val0 wit None;
+  Genprint.register_print0
+    wit
+    (Genprint.generic_val_print %> Genprint.printer_result_of_top_printer_result)
+    (Genprint.generic_val_print %> Genprint.printer_result_of_top_printer_result)
+    Genprint.generic_val_print;
   wit
 
 (** All the types considered here are base types *)
@@ -445,6 +456,10 @@ let (wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type) =
       Genprint.TopPrinterNeedsContext (fun env sigma -> v 0 (hov 0 (Pptactic.pr_glob_tactic env sigma tac) ++ pr_env env sigma))
     | _ -> Genprint.TopPrinterBasic (fun _ -> str "<tactic closure>") in
   let () = Genprint.register_val_print0 (base_val_typ wit) pr in
+  Genprint.register_print0 wit
+  (fun _ -> assert false)
+  (fun _ -> assert false)
+  pr;
   wit
 
 exception CoercionError of Id.t * (Environ.env * Evd.evar_map) option * Val.t * string
@@ -459,3 +474,116 @@ end
 
 let error_ltac_variable ?loc id env v s =
   Loc.raise ?loc (CoercionError (id, env, v, s))
+
+(** {5 Late args} *)
+
+type late_arg = int
+
+let late_arg_ctr = ref 0
+
+let new_late_arg () = incr late_arg_ctr; !late_arg_ctr
+
+type late_args_map =
+  (late_arg * raw_generic_argument) list *
+  (late_arg * glob_generic_argument) list
+
+let f_late_args_map : late_args_map Evd.Store.field = Evd.Store.field "late_args_map"
+
+let retrieve_raw_late_arg late_arg =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  Proofview.tclUNIT (fst late_args_map |> List.assoc late_arg)
+
+let populate_raw_late_arg late_arg v =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  let late_args_map = ((late_arg, v) :: fst late_args_map, snd late_args_map) in
+  let store = Evd.Store.set store f_late_args_map late_args_map in
+  let sigma = Evd.set_extra_data store sigma in
+  Proofview.Unsafe.tclEVARS sigma
+
+let wrap_populate_raw_late_arg late_arg v tac =
+  retrieve_raw_late_arg late_arg >>= fun initial ->
+  populate_raw_late_arg late_arg v <*>
+  tac >>= fun r ->
+  populate_raw_late_arg late_arg initial <*>
+  Proofview.tclUNIT r
+
+let retrieve_glob_late_arg late_arg =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  Proofview.tclUNIT (snd late_args_map |> List.assoc late_arg)
+
+let populate_glob_late_arg late_arg v =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  let late_args_map = (fst late_args_map, (late_arg, v) :: snd late_args_map) in
+  let store = Evd.Store.set store f_late_args_map late_args_map in
+  let sigma = Evd.set_extra_data store sigma in
+  Printf.eprintf "!! %d %d\n" late_arg (snd late_args_map |> List.length);
+  Proofview.Unsafe.tclEVARS sigma
+
+let wrap_populate_glob_late_arg late_arg v tac =
+  retrieve_glob_late_arg late_arg >>= fun initial ->
+  populate_glob_late_arg late_arg v <*>
+  tac >>= fun r ->
+  populate_glob_late_arg late_arg initial <*>
+  Proofview.tclUNIT r
+
+let wrap_keep_late_args t =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  t >>= fun r ->
+  let store = Evd.Store.set store f_late_args_map late_args_map in
+  let sigma = Evd.set_extra_data store sigma in
+  Proofview.Unsafe.tclEVARS sigma <*>
+  Proofview.tclUNIT r
+
+let wit_late_arg : (late_arg, late_arg, Empty.t) genarg_type =
+  let wit = Genarg.create_arg "late_arg" in
+  let () = register_val0 wit None in
+  Pptactic.declare_extra_genarg_pprule_with_level
+    wit
+    (fun env sigma _ _ _ n late_arg ->
+      let store = Evd.get_extra_data sigma in
+      let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+      Pputils.pr_raw_generic env sigma (Some n) (fst late_args_map |> List.assoc late_arg)
+    )
+    (fun env sigma _ _ _ n late_arg ->
+      let store = Evd.get_extra_data sigma in
+      let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+      Printf.eprintf "?? %d %d\n" late_arg (snd late_args_map |> List.length);
+      Pputils.pr_glb_generic env sigma (Some n) (snd late_args_map |> List.assoc late_arg)
+    )
+    (fun env sigma _ _ _ n late_constr -> assert false)
+    Ppconstr.ltop Ppconstr.lsimpleconstr;
+  wit
+
+let glob_late_arg_tac_arg ?isquot late_arg =
+  Tacexpr.TacGeneric (isquot, GenArg (Glbwit wit_late_arg, late_arg))
+
+let glob_late_arg_tac ?isquot late_arg =
+  CAst.make (Tacexpr.TacArg (glob_late_arg_tac_arg ?isquot late_arg))
+
+(** {5 Printed args} *)
+
+let wit_printed_arg : (Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg) genarg_type =
+  let wit = Genarg.create_arg "printed_arg" in
+  let () = register_val0 wit None in
+  Pptactic.declare_extra_genarg_pprule
+    wit
+    (fun env sigma _ _ _ msg -> msg ())
+    (fun env sigma _ _ _ msg -> msg ())
+    (fun env sigma _ _ _ msg -> msg ());
+  wit
+
+let glob_printed_arg_tac_arg ?isquot msg =
+  Tacexpr.TacGeneric (isquot, GenArg (Glbwit wit_printed_arg, msg))
+
+let glob_printed_arg_tac ?isquot msg =
+  CAst.make (Tacexpr.TacArg (glob_printed_arg_tac_arg ?isquot msg))

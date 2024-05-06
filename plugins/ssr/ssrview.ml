@@ -179,9 +179,11 @@ end)
 (* To inject a constr into a glob_constr we use an Ltac variable *)
 let tclINJ_CONSTR_IST ist p =
   let fresh_id = Ssrcommon.mk_internal_id "ssr_inj_constr_in_glob" in
+  Proofview.tclENV >>= fun env ->
+  Proofview.tclEVARMAP >>= fun sigma ->
   let ist = {
     ist with Geninterp.lfun =
-      Id.Map.add fresh_id (Taccoerce.Value.of_constr p) ist.Geninterp.lfun} in
+      Id.Map.add fresh_id (Tacinterp.Value.of_constr env sigma p) ist.Geninterp.lfun} in
   tclUNIT (ist,Glob_term.GVar fresh_id)
 
 let mkGHole =

@@ -131,7 +131,7 @@ let tcldokey =
   let prods = [ TacTerm "do"; mk_non_term wit_ssrdoarg (Names.Id.of_string "arg") ] in
   let tac = begin fun args ist -> match args with
     | [arg] ->
-      let arg = cast_arg wit_ssrdoarg arg in
+      let arg = cast_arg wit_ssrdoarg (arg.Proofview.Named.v) in
       ssrdotac ist arg
     | _ -> assert false
   end in
@@ -182,9 +182,9 @@ let tclseqkey =
     ; mk_non_term wit_ssrseqarg (Names.Id.of_string "arg") ] in
   let tac =  begin fun args ist -> match args with
     | [tac; dir; arg] ->
-      let tac = cast_arg wit_ssrtclarg tac in
-      let dir = cast_arg wit_ssrseqdir dir in
-      let arg = cast_arg wit_ssrseqarg arg in
+      let tac = cast_arg wit_ssrtclarg tac.Proofview.Named.v in
+      let dir = cast_arg wit_ssrseqdir dir.Proofview.Named.v in
+      let arg = cast_arg wit_ssrseqarg arg.Proofview.Named.v in
       tclSEQAT ist tac dir arg
     | _ -> assert false
   end in
@@ -844,7 +844,7 @@ END
     let prods = [ TacTerm "abstract"; mk_non_term wit_ssrdgens (Names.Id.of_string "gens") ] in
     let tac = begin fun args ist -> match args with
       | [gens] ->
-        let gens = cast_arg wit_ssrdgens gens in
+        let gens = cast_arg wit_ssrdgens gens.Proofview.Named.v in
         if List.length (fst gens) <> 1 then
           errorstrm (str"dependents switches '/' not allowed here");
         Ssripats.ssrabstract (ssrdgens_of_parsed_dgens gens)

@@ -284,11 +284,43 @@ module Trace : sig
 
   type tactic_wrapper = {wrap : 'a. 'a tactic -> 'a tactic}
 
+  val id_tactic_wrapper : tactic_wrapper
+  val compose_tactic_wrappers : tactic_wrapper -> tactic_wrapper -> tactic_wrapper
+
+  val tag_deferred_contents : Proofview_monad.Info.deferred_id -> 'a tactic -> 'a tactic
+  val tag_new_deferred_contents : (Proofview_monad.Info.deferred_id -> 'a tactic) -> 'a tactic
+  val deferred_placeholder : Proofview_monad.Info.deferred_id -> unit tactic
+  val new_deferred_placeholder : Proofview_monad.Info.deferred_id tactic
   val tag_dispatch : (tag_branch:tactic_wrapper -> 'a tactic) -> 'a tactic
   val message : Proofview_monad.Info.lazy_msg -> unit tactic
-  val tag_tactic : Proofview_monad.Info.lazy_msg -> 'a tactic -> 'a tactic
+  val tag_tactic : Proofview_monad.Info.tactic_kind -> Proofview_monad.Info.lazy_msg -> 'a tactic -> 'a tactic
 
   val pr_info : ?lvl:int -> Proofview_monad.Info.trace -> Pp.t
+end
+
+module Tagged : sig
+  type 'a t = {
+    deferred_id : Proofview_monad.Info.deferred_id;
+    v : 'a;
+  }
+
+  val empty_tags : Proofview_monad.Info.tag list tactic
+  val cons_tags :
+    Proofview_monad.Info.tag tactic ->
+    Proofview_monad.Info.tag list tactic ->
+    Proofview_monad.Info.tag list tactic
+  val append_tags :
+    Proofview_monad.Info.tag list tactic ->
+    Proofview_monad.Info.tag list tactic ->
+    Proofview_monad.Info.tag list tactic
+  val concat_tags :
+    Proofview_monad.Info.tag list tactic list ->
+    Proofview_monad.Info.tag list tactic
+
+  val make : Proofview_monad.Info.deferred_id -> 'a -> 'a t
+  (* val append : Proofview_monad.Info.tag list tactic -> 'a t -> 'a t *)
+
+  val map : ('a -> 'b) -> 'a t -> 'b t
 end
 
 

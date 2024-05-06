@@ -163,7 +163,7 @@ let add_genarg tag pr =
   let tag = Geninterp.Val.create tag in
   let glob ist x = (ist, x) in
   let subst _ x = x in
-  let interp ist x = Ftactic.return (Geninterp.Val.Dyn (tag, x)) in
+  let interp ist x = Ftactic.return (Geninterp.TaggedVal.make (Geninterp.Val.Dyn (tag, x))) in
   let gen_pr env sigma _ _ _ = pr env sigma in
   let () = Genintern.register_intern0 wit glob in
   let () = Gensubst.register_subst0 wit subst in
@@ -215,7 +215,7 @@ let intern_ssrhoi ist = function
 let interp_ssrhoi ist env sigma = function
   | Hyp h -> let h' = interp_hyp ist env sigma h in Hyp h'
   | Id (SsrHyp (loc, id)) ->
-    let id' = Tacinterp.interp_ident ist env sigma id in
+    let id' = (Tacinterp.interp_ident ist env sigma id).Proofview.Named.v in
     Id (SsrHyp (loc, id'))
 
 }
@@ -1694,7 +1694,7 @@ let tclintroskey =
     [ mk_non_term wit_ssrintrosarg (Names.Id.of_string "arg") ] in
   let tac = begin fun args ist -> match args with
     | [arg] ->
-      let arg = cast_arg wit_ssrintrosarg arg in
+      let arg = cast_arg wit_ssrintrosarg arg.Proofview.Named.v in
       let tac, intros = arg in
       ssrevaltac ist tac <*> tclIPATssr intros
     | _ -> assert false
