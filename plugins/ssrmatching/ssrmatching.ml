@@ -107,7 +107,7 @@ let add_genarg tag pr =
   let tag = Geninterp.Val.create tag in
   let glob ist x = (ist, x) in
   let subst _ x = x in
-  let interp ist x = Ftactic.return (Geninterp.Val.Dyn (tag, x)) in
+  let interp ist x = Ftactic.return (Geninterp.TaggedVal.make ist.deferred_id (Geninterp.Val.Dyn (tag, x))) in
   let gen_pr env sigma _ _ _ = pr env sigma in
   let () = Genintern.register_intern0 wit glob in
   let () = Gensubst.register_subst0 wit subst in
@@ -1339,7 +1339,7 @@ let fill_occ_term env sigma0 cl occ (sigma, t) =
 let cpattern_of_id id =
   { kind= NoFlag
   ; pattern = DAst.make @@ GRef (GlobRef.VarRef  id, None), None
-  ; interpretation = Some Geninterp.({ lfun = Id.Map.empty; poly = false; extra = Tacinterp.TacStore.empty })}
+  ; interpretation = Some Geninterp.({ deferred_id = Proofview_monad.Info.fake_deferred_id; lfun = Id.Map.empty; poly = false; extra = Tacinterp.TacStore.empty })}
 
 let is_wildcard ({pattern = (l, r); _} : cpattern) : bool = match DAst.get l, r with
   | _, Some { CAst.v = CHole _ } | GHole _, None -> true

@@ -111,6 +111,7 @@ let conclPattern concl pat tac =
      let env = Proofview.Goal.env gl in
      let sigma = Proofview.Goal.sigma gl in
      constr_bindings env sigma >>= fun constr_bindings ->
+     Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
      Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
      let open Genarg in
      let open Geninterp in
@@ -120,7 +121,8 @@ let conclPattern concl pat tac =
      in
      let fold id c accu = Id.Map.add id (inj c) accu in
      let lfun = Id.Map.fold fold constr_bindings Id.Map.empty in
-     let ist = { lfun
+     let ist = { deferred_id
+               ; lfun
                ; poly
                ; extra = TacStore.empty } in
      match tac with

@@ -22,7 +22,11 @@ type +'a t = 'a focus Proofview.tactic
 
 (** {5 Monadic interface} *)
 
-val return : 'a -> 'a t
+val distribute_copy : 'a -> 'a list Proofview.tactic
+
+val distribute_tagged : 'a Proofview.Tagged.t -> 'a Proofview.Tagged.t list Proofview.tactic
+
+val return : ?distribute:('a -> 'a list Proofview.tactic) -> 'a -> 'a t
 (** The unit of the monad. *)
 
 val bind : 'a t -> ('a -> 'b t) -> 'b t
@@ -30,7 +34,7 @@ val bind : 'a t -> ('a -> 'b t) -> 'b t
 
 (** {5 Operations} *)
 
-val lift : 'a Proofview.tactic -> 'a t
+val lift : ?distribute:('a -> 'a list Proofview.tactic) -> 'a Proofview.tactic -> 'a t
 (** Transform a tactic into a focussing tactic. The resulting tactic is not
     focused. *)
 

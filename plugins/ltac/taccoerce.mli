@@ -96,6 +96,8 @@ val wit_constr_context : (Empty.t, Empty.t, Constr_matching.context) genarg_type
 
 val wit_constr_under_binders : (Empty.t, Empty.t, Ltac_pretype.constr_under_binders) genarg_type
 
+val wit_value : (Val.t, Val.t, Val.t) genarg_type
+
 val error_ltac_variable : ?loc:Loc.t -> Id.t ->
   (Environ.env * Evd.evar_map) option -> Value.t -> string -> 'a
 
@@ -113,3 +115,35 @@ type tacvalue =
 val wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type
 
 val pr_value : (Environ.env * Evd.evar_map) option -> Geninterp.Val.t -> Pp.t
+
+(** {5 Late args} *)
+
+type late_arg
+
+val new_late_arg : unit -> late_arg
+
+type late_args_map
+
+val f_late_args_map : late_args_map Evd.Store.field
+
+val retrieve_raw_late_arg : late_arg -> raw_generic_argument Proofview.tactic
+val populate_raw_late_arg : late_arg -> raw_generic_argument -> unit Proofview.tactic
+val wrap_populate_raw_late_arg : late_arg -> raw_generic_argument -> 'a Proofview.tactic -> 'a Proofview.tactic
+
+val retrieve_glob_late_arg : late_arg -> glob_generic_argument Proofview.tactic
+val populate_glob_late_arg : late_arg -> glob_generic_argument -> unit Proofview.tactic
+val wrap_populate_glob_late_arg : late_arg -> glob_generic_argument -> 'a Proofview.tactic -> 'a Proofview.tactic
+
+val wrap_keep_late_args : 'a Proofview.tactic -> 'a Proofview.tactic
+
+val wit_late_arg : (late_arg, late_arg, Empty.t) genarg_type
+
+val glob_late_arg_tac_arg : ?isquot:string -> late_arg -> Tacexpr.glob_tactic_arg
+val glob_late_arg_tac : ?isquot:string -> late_arg -> Tacexpr.glob_tactic_expr
+
+(** {5 Printed args} *)
+
+val wit_printed_arg : (Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg) genarg_type
+
+val glob_printed_arg_tac_arg : ?isquot:string -> Proofview_monad.Info.lazy_msg -> Tacexpr.glob_tactic_arg
+val glob_printed_arg_tac : ?isquot:string -> Proofview_monad.Info.lazy_msg -> Tacexpr.glob_tactic_expr

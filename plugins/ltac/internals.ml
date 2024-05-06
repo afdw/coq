@@ -354,3 +354,6 @@ let declare_equivalent_keys c c' =
     match k1, k2 with
     | Some k1, Some k2 -> Keys.declare_equiv_keys k1 k2
     | _ -> ()
+
+let tclTEST =
+  Proofview.tclUNIT ()

@@ -378,7 +378,9 @@ let one_base where conds tac_main bas =
     let tac = match h.rew_tac with
     | None -> Proofview.tclUNIT ()
     | Some (Genarg.GenArg (Genarg.Glbwit wit, tac)) ->
-      let ist = { Geninterp.lfun = Id.Map.empty
+      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      let ist = { Geninterp.deferred_id
+                ; lfun = Id.Map.empty
                 ; poly
                 ; extra = Geninterp.TacStore.empty } in
       Ftactic.run (Geninterp.interp wit ist tac) (fun _ -> Proofview.tclUNIT ())

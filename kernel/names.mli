@@ -56,6 +56,8 @@ sig
   (** Same as {!of_string} except that any string made of supported UTF-8 characters is accepted.
       @raise UserError if the string is invalid as an UTF-8 string. *)
 
+  val of_string_unchecked : string -> t
+
   val to_string : t -> string
   (** Converts a identifier into an string. *)
 

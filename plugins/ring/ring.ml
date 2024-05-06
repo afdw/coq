@@ -190,7 +190,6 @@ let exec_tactic env sigma n f args =
     (succ i, x :: vars, Id.Map.add id (Value.of_constr arg) lfun)
   in
   let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
-  let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun = lfun; } in
   (* Build the getter *)
   let lid = List.init n (fun i -> Id.of_string("x"^string_of_int i)) in
   let n = Genarg.in_gen (Genarg.glbwit Stdarg.wit_int) n in
@@ -198,7 +197,10 @@ let exec_tactic env sigma n f args =
   let getter = Tacexp (CAst.make (TacFun (List.map (fun n -> Name n) lid, get_res))) in
   (* Evaluate the whole result *)
   let _, pv = Proofview.init sigma [env, EConstr.mkProp] in
-  let tac = Tacinterp.eval_tactic_ist ist (ltac_call f (args@[getter])) in
+  let tac =
+    Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+    let ist = { (Tacinterp.default_ist deferred_id) with Tacinterp.lfun = lfun; } in
+    Tacinterp.eval_tactic_ist ist (ltac_call f (args@[getter])) in
   let ((), pv, _, _) = Proofview.apply ~name:(Id.of_string "ring") ~poly:false (Global.env ()) tac pv in
   let sigma = Evd.minimize_universes (Proofview.return pv) in
   let nf c = constr_of sigma c in
@@ -660,7 +662,7 @@ let make_term_list env sigma carrier rl =
 
 let carg c = Tacinterp.Value.of_constr (EConstr.of_constr c)
 let tacarg expr =
-  Tacinterp.Value.of_closure (Tacinterp.default_ist ()) expr
+  Tacinterp.Value.of_closure (Tacinterp.default_ist Proofview_monad.Info.fake_deferred_id) expr
 
 let ltac_ring_structure e =
   let req = carg e.ring_req in
