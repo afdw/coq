@@ -94,7 +94,7 @@ val ml_tactic_extend : plugin:string -> name:string -> local:locality_flag ->
     argument. *)
 
 val ml_val_tactic_extend : plugin:string -> name:string -> local:locality_flag ->
-  ?deprecation:Deprecation.t -> ('r, Geninterp.Val.t Ftactic.t) ml_ty_sig -> 'r -> unit
+  ?deprecation:Deprecation.t -> ('r, Geninterp.TaggedVal.t Ftactic.t) ml_ty_sig -> 'r -> unit
 (** Same as {!ml_tactic_extend} but the function can return an argument
     instead. *)
 
@@ -161,7 +161,7 @@ type 'b argument_subst =
 
 type ('b, 'c) argument_interp =
 | ArgInterpRet : ('c, 'c) argument_interp
-| ArgInterpFun : ('b, Geninterp.Val.t) Geninterp.interp_fun -> ('b, 'c) argument_interp
+| ArgInterpFun : ('b, Geninterp.TaggedVal.t) Geninterp.interp_fun -> ('b, 'c) argument_interp
 | ArgInterpWit : ('a, 'b, 'r) Genarg.genarg_type -> ('b, 'c) argument_interp
 | ArgInterpSimple :
   (Geninterp.interp_sign -> Environ.env -> Evd.evar_map -> 'b -> 'c) -> ('b, 'c) argument_interp
