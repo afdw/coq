@@ -212,8 +212,8 @@ let string_of_genarg_arg (ArgumentType arg) =
   let pr_with_bindings prc prlc (c,bl) =
     prc c ++ Miscprint.pr_bindings prc prlc bl
 
-  let pr_with_bindings_arg prc prlc (clear_flag,c) =
-    pr_clear_flag clear_flag (pr_with_bindings prc prlc) c
+  let pr_with_bindings_arg pr_with_bindings (clear_flag,c) =
+    pr_clear_flag clear_flag pr_with_bindings c
 
   let pr_with_constr prc = function
     | None -> mt ()
@@ -245,16 +245,15 @@ let string_of_genarg_arg (ArgumentType arg) =
     in
     pr_sequence (fun x -> x) l
 
-  let pr_extend_gen pr_gen _ { mltac_name = s; mltac_index = i } l =
-      let name =
-        str s.mltac_plugin ++ str "::" ++ str s.mltac_tactic ++
-        str "@" ++ int i
-      in
+  let pr_extend_name { mltac_name = s; mltac_index = i } =
+    str s.mltac_plugin ++ str "::" ++ str s.mltac_tactic ++ str "@" ++ int i
+
+  let pr_extend_gen pr_gen _ opn l =
       let args = match l with
         | [] -> mt ()
         | _ -> spc() ++ pr_sequence pr_gen l
       in
-      hov 2 (str "<" ++ name ++ str ">" ++ args)
+      hov 2 (str "<" ++ pr_extend_name opn ++ str ">" ++ args)
 
   let rec pr_user_symbol = function
   | Extend.Ulist1 tkn -> "ne_" ^ pr_user_symbol tkn ^ "_list"
@@ -281,20 +280,21 @@ let string_of_genarg_arg (ArgumentType arg) =
       KerName.print key
 
   let pr_alias_gen pr_gen lev key l =
+    let exception AliasNotFound in
     try
-      let pp = KNmap.find key !prnotation_tab in
+      let pp = try KNmap.find key !prnotation_tab with Not_found -> raise AliasNotFound in
       let rec pack prods args = match prods, args with
       | [], [] -> []
       | TacTerm s :: prods, args -> TacTerm s :: pack prods args
       | TacNonTerm (_, (_, None)) :: prods, args -> pack prods args
       | TacNonTerm (loc, (symb, (Some _ as ido))) :: prods, arg :: args ->
         TacNonTerm (loc, ((symb, arg), ido)) :: pack prods args
-      | _ -> raise Not_found
+      | _ -> raise AliasNotFound
       in
       let prods = pack pp.pptac_prods l in
       let p = hov 2 (pr_tacarg_using_rule pr_gen prods) in
       if pp.pptac_level > lev then surround p else p
-    with Not_found ->
+    with AliasNotFound ->
       let pr _ = str "_" in
       hov 2 (KerName.print key ++ spc () ++ pr_sequence pr l ++ str " (* Generic printer *)")
 
@@ -316,9 +316,14 @@ let string_of_genarg_arg (ArgumentType arg) =
   | Glbwit (OptArg wit) -> Some (Option.map (in_gen (glbwit wit)) arg)
   | _ -> None
 
+  let is_raw_arg wit =
+    match wit with
+    | ArgumentType (ExtraArg tag) when ArgT.repr tag = "late_arg" || ArgT.repr tag = "printed_arg" -> true
+    | _ -> false
+
   let rec pr_any_arg : type l. (_ -> l generic_argument -> Pp.t) -> _ -> l generic_argument -> Pp.t =
   fun prtac symb arg -> match symb with
-  | Extend.Uentry tag when is_genarg tag (genarg_tag arg) -> prtac LevelSome arg
+  | Extend.Uentry tag when is_genarg tag (genarg_tag arg) || is_raw_arg (genarg_tag arg) -> prtac LevelSome arg
   | Extend.Ulist1 s | Extend.Ulist0 s ->
     begin match get_list arg with
     | None -> str "ltac:(" ++ prtac LevelSome arg ++ str ")"
@@ -516,13 +521,13 @@ let string_of_genarg_arg (ArgumentType arg) =
     | RepeatStar -> str "?"
     | RepeatPlus -> str "!"
 
-  let pr_core_destruction_arg prc prlc = function
-    | ElimOnConstr c -> pr_with_bindings prc prlc c
+  let pr_core_destruction_arg pr_with_bindings = function
+    | ElimOnConstr c -> pr_with_bindings c
     | ElimOnIdent {CAst.loc;v=id} -> pr_with_comments ?loc (pr_id id)
     | ElimOnAnonHyp n -> int n
 
-  let pr_destruction_arg prc prlc (clear_flag,h) =
-    pr_clear_flag clear_flag (pr_core_destruction_arg prc prlc) h
+  let pr_destruction_arg pr_with_bindings (clear_flag,h) =
+    pr_clear_flag clear_flag (pr_core_destruction_arg pr_with_bindings) h
 
   let pr_inversion_kind = let open Inv in function
     | SimpleInversion -> primitive "simple inversion"
@@ -577,7 +582,7 @@ let pr_goal_selector ~toplevel s =
     let pr = function
       | TacGeneric (_,arg) ->
          let name = string_of_genarg_arg (genarg_tag arg) in
-         if name = "unit" || name = "int" then
+         if name = "unit" || name = "int" || name = "late_arg" then
            (* Hard-wired parsing rules *)
            pr_gen  arg
          else
@@ -654,6 +659,8 @@ let pr_goal_selector ~toplevel s =
     pr_constr    : Environ.env -> Evd.evar_map -> 'trm -> Pp.t;
     pr_lconstr   : Environ.env -> Evd.evar_map -> 'trm -> Pp.t;
     pr_dconstr   : Environ.env -> Evd.evar_map -> 'dtrm -> Pp.t;
+    pr_constr_with_bindings    : Environ.env -> Evd.evar_map -> 'trm with_bindings -> Pp.t;
+    pr_dconstr_with_bindings   : Environ.env -> Evd.evar_map -> 'dtrm_with_bindings -> Pp.t;
     pr_red_pattern   : Environ.env -> Evd.evar_map -> 'rpat -> Pp.t;
     pr_pattern   : Environ.env -> Evd.evar_map -> 'pat -> Pp.t;
     pr_lpattern  : Environ.env -> Evd.evar_map -> 'pat -> Pp.t;
@@ -669,6 +676,7 @@ let pr_goal_selector ~toplevel s =
   constraint 'a = <
       term      :'trm;
       dterm     :'dtrm;
+      dterm_with_bindings :'dtrm_with_bindings;
       pattern   :'pat;
       red_pattern :'rpat;
       constant  :'cst;
@@ -680,9 +688,10 @@ let pr_goal_selector ~toplevel s =
     >
 
     let pr_atom env sigma pr strip_prod_binders tag_atom =
-      let pr_with_bindings = pr_with_bindings (pr.pr_constr env sigma) (pr.pr_lconstr env sigma) in
-      let pr_with_bindings_arg_full = pr_with_bindings_arg in
-      let pr_with_bindings_arg = pr_with_bindings_arg (pr.pr_constr env sigma) (pr.pr_lconstr env sigma) in
+      let pr_constr_with_bindings = pr.pr_constr_with_bindings env sigma in
+      let pr_dconstr_with_bindings = pr.pr_dconstr_with_bindings env sigma in
+      let pr_constr_with_bindings_arg = pr_with_bindings_arg pr_constr_with_bindings in
+      let pr_dconstr_with_bindings_arg = pr_with_bindings_arg pr_dconstr_with_bindings in
       let pr_red_expr = pr_red_expr env sigma (pr.pr_constr,pr.pr_lconstr,pr.pr_constant,pr.pr_red_pattern,pr.pr_occvar) in
 
       let _pr_constrarg c = spc () ++ pr.pr_constr env sigma c in
@@ -690,7 +699,7 @@ let pr_goal_selector ~toplevel s =
       let pr_intarg n = spc () ++ int n in
 
       (* Some printing combinators *)
-      let pr_eliminator cb = keyword "using" ++ pr_arg pr_with_bindings cb in
+      let pr_eliminator cb = keyword "using" ++ pr_arg pr_constr_with_bindings cb in
 
       let pr_binder_fix (nal,t) =
         (*  match t with
@@ -760,16 +769,16 @@ let pr_goal_selector ~toplevel s =
           hov 1 (
             (if a then mt() else primitive "simple ") ++
               primitive (with_evars ev "apply") ++ spc () ++
-              prlist_with_sep pr_comma pr_with_bindings_arg cb ++
+              prlist_with_sep pr_comma pr_dconstr_with_bindings_arg cb ++
               pr_non_empty_arg (pr_in_hyp_as (pr.pr_dconstr env sigma) pr.pr_name) inhyp
           )
         | TacElim (ev,cb,cbo) ->
           hov 1 (
             primitive (with_evars ev "elim")
-            ++ pr_arg pr_with_bindings_arg cb
+            ++ pr_arg pr_constr_with_bindings_arg cb
             ++ pr_opt pr_eliminator cbo)
         | TacCase (ev,cb) ->
-          hov 1 (primitive (with_evars ev "case") ++ spc () ++ pr_with_bindings_arg cb)
+          hov 1 (primitive (with_evars ev "case") ++ spc () ++ pr_constr_with_bindings_arg cb)
         | TacMutualFix (id,n,l) ->
           hov 1 (
             primitive "fix" ++ spc () ++ pr_id id ++ pr_intarg n ++ spc()
@@ -813,7 +822,7 @@ let pr_goal_selector ~toplevel s =
             primitive (with_evars ev (if isrec then "induction" else "destruct"))
             ++ spc ()
             ++ prlist_with_sep pr_comma (fun (h,ids,cl) ->
-              pr_destruction_arg (pr.pr_dconstr env sigma) (pr.pr_dconstr env sigma) h ++
+              pr_destruction_arg pr_dconstr_with_bindings h ++
                 pr_non_empty_arg (pr_with_induction_names (pr.pr_dconstr env sigma)) ids ++
                 pr_opt (pr_clauses None pr.pr_name) cl) l ++
               pr_opt pr_eliminator el
@@ -847,7 +856,7 @@ let pr_goal_selector ~toplevel s =
               (fun () -> str ","++spc())
               (fun (b,m,c) ->
                 pr_orient b ++ pr_multi m ++
-                  pr_with_bindings_arg_full (pr.pr_dconstr env sigma) (pr.pr_dconstr env sigma) c)
+                  pr_dconstr_with_bindings_arg c)
               l
             ++ pr_non_empty_arg (pr_clauses (Some true) pr.pr_name) cl
             ++ pr_non_empty_arg (pr_by_tactic (pr.pr_tactic (LevelLe ltactical))) tac
@@ -1042,6 +1051,9 @@ let pr_goal_selector ~toplevel s =
               (match isquot with Some name -> str name ++ str ":(" ++ p ++ str ")" | None -> p), latom
             | TacArg (TacCall {CAst.v=(f,[])}) ->
               pr.pr_reference f, latom
+            | TacArg (TacCall {CAst.loc; v=(f,l)}) when Pp.string_of_ppcmds (pr.pr_reference f) = "" ->
+              pr_with_comments ?loc (hov 1 (prlist_with_sep spc pr_tacarg l)),
+              lcall
             | TacArg (TacCall {CAst.loc; v=(f,l)}) ->
               pr_with_comments ?loc (hov 1 (
                 pr.pr_reference f ++ spc ()
@@ -1092,6 +1104,8 @@ let pr_goal_selector ~toplevel s =
       pr_constr = pr_constr_expr;
       pr_dconstr = pr_constr_expr;
       pr_lconstr = pr_lconstr_expr;
+      pr_constr_with_bindings = (fun env sigma -> pr_with_bindings (pr_constr_expr env sigma) (pr_lconstr_expr env sigma));
+      pr_dconstr_with_bindings = (fun env sigma -> pr_with_bindings (pr_constr_expr env sigma) (pr_lconstr_expr env sigma));
       pr_red_pattern = pr_constr_expr;
       pr_pattern = pr_constr_pattern_expr;
       pr_lpattern = pr_lconstr_pattern_expr;
@@ -1124,6 +1138,8 @@ let pr_goal_selector ~toplevel s =
         pr_constr = (fun env sigma -> pr_and_constr_expr (pr_glob_constr_env env sigma));
         pr_dconstr = (fun env sigma -> pr_and_constr_expr (pr_glob_constr_env env sigma));
         pr_lconstr = (fun env sigma -> pr_and_constr_expr (pr_lglob_constr_env env sigma));
+        pr_constr_with_bindings = (fun env sigma -> pr_with_bindings (pr_and_constr_expr (pr_glob_constr_env env sigma)) (pr_and_constr_expr (pr_lglob_constr_env env sigma)));
+        pr_dconstr_with_bindings = (fun env sigma -> pr_with_bindings (pr_and_constr_expr (pr_glob_constr_env env sigma)) (pr_and_constr_expr (pr_lglob_constr_env env sigma)));
         pr_red_pattern = (fun env sigma -> pr_and_constr_expr (pr_glob_constr_env env sigma));
         pr_pattern = (fun env sigma -> pr_pat_and_constr_expr (pr_glob_constr_env env sigma));
         pr_constant = pr_or_var (pr_and_short_name (pr_evaluable_reference_env env));
@@ -1157,10 +1173,12 @@ let pr_goal_selector ~toplevel s =
   let pr_atomic_tactic_level env sigma t =
     let prtac (t:atomic_tactic_expr) =
       let pr = {
-        pr_tactic = (fun _ _ -> str "<tactic>");
+        pr_tactic = pr_glob_tactic_level env sigma;
         pr_constr = pr_econstr_env;
-        pr_dconstr = (fun env sigma -> pr_and_constr_expr (pr_glob_constr_env env sigma));
+        pr_dconstr = (fun env sigma c -> let (sigma, c) = c env sigma in pr_econstr_env env sigma c);
         pr_lconstr = pr_leconstr_env;
+        pr_constr_with_bindings = (fun env sigma -> pr_with_bindings (pr_econstr_env env sigma) (pr_leconstr_env env sigma));
+        pr_dconstr_with_bindings = (fun env sigma c -> let (sigma, c) = c env sigma in pr_with_bindings (pr_econstr_env env sigma) (pr_leconstr_env env sigma) c);
         pr_red_pattern = pr_constr_pattern_env;
         pr_pattern = pr_constr_pattern_env;
         pr_lpattern = pr_lconstr_pattern_env;
@@ -1301,7 +1319,7 @@ let pr_destruction_arg_env c = Genprint.TopPrinterNeedsContext (fun env sigma ->
   | clear_flag,ElimOnAnonHyp n as x -> sigma, x
   | clear_flag,ElimOnIdent id as x -> sigma, x in
   pr_destruction_arg
-    (pr_econstr_env env sigma) (pr_leconstr_env env sigma) c)
+    (pr_with_bindings (pr_econstr_env env sigma) (pr_leconstr_env env sigma)) c)
 
 let make_constr_printer f c =
   Genprint.TopPrinterNeedsContextAndLevel {
@@ -1397,9 +1415,9 @@ let () =
     pr_with_bindings_env
   ;
   register_print0 Tacarg.wit_destruction_arg
-    (lift_env (fun env sigma -> pr_destruction_arg (pr_constr_expr env sigma) (pr_lconstr_expr env sigma)))
-    (lift_env (fun env sigma -> pr_destruction_arg (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
-                  (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)))
+    (lift_env (fun env sigma -> pr_destruction_arg (pr_with_bindings (pr_constr_expr env sigma) (pr_lconstr_expr env sigma))))
+    (lift_env (fun env sigma -> pr_destruction_arg (pr_with_bindings (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
+                  (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma))))
     pr_destruction_arg_env
   ;
   register_basic_print0 Stdarg.wit_int int int int;

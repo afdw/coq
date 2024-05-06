@@ -76,13 +76,20 @@ module Info = struct
       print. But we don't want to compute the result. *)
   type lazy_msg = unit -> Pp.t
 
+  type tactic_kind =
+    | Primitive of Pp.t
+    | Builtin of Pp.t
+    | Alias of Pp.t
+    | ML of Pp.t
+    [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
+
   (** The type of the tags for [Info]. *)
   type tag =
     | TagDeferredContents of deferred_id
     | TagDeferredPlaceholder of deferred_id
     | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
     | TagDispatchBranch (** A marker to delimit an individual branch of [TagDispatch]. *)
-    | TagTactic of lazy_msg (** A tactic call. *)
+    | TagTactic of tactic_kind * lazy_msg (** A tactic call. *)
     | TagMessage of lazy_msg (** A message by [TacId]. *)
 
   type state = tag incr
@@ -91,7 +98,7 @@ module Info = struct
   type trace =
     | Sequence of trace list (** A sequence. *)
     | Dispatch of trace list (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
-    | Tactic of lazy_msg * trace (** A tactic call, with its execution detailed. *)
+    | Tactic of tactic_kind * lazy_msg * trace (** A tactic call, with its execution detailed. *)
     | Message of lazy_msg (** A message by [TacId]. *)
 
   let rec collect_deferred_tree deferred_map = function
@@ -111,7 +118,7 @@ module Info = struct
                 TagDispatchBranch,
                 [
                   Node (
-                    TagTactic (fun () -> Pp.(str "Duplicate contents for deferred_id " ++ int deferred_id)),
+                    TagTactic (Primitive (Pp.str "<error>"), fun () -> Pp.(str "Duplicate contents for deferred_id " ++ int deferred_id)),
                     []
                   )
                 ]
@@ -149,7 +156,7 @@ module Info = struct
       deferred_map
         |> DeferredIdMap.find_opt deferred_id
         |> Option.map (substitute_deferred_forest deferred_map)
-        |> Option.default [Node (TagTactic (fun () -> Pp.(str "No contents for deferred_id " ++ int deferred_id)), [])]
+        |> Option.default [Node (TagTactic (Primitive (Pp.str "<error>"), fun () -> Pp.(str "No contents for deferred_id " ++ int deferred_id)), [])]
     | Node (TagDeferredPlaceholder _, _) ->
       assert false
     | Node (tag, f) ->
@@ -168,7 +175,7 @@ module Info = struct
         )
       )
     | Node (TagDispatchBranch, _) -> assert false
-    | Node (TagTactic m, f) -> Tactic (m, convert_forest f)
+    | Node (TagTactic (kind, m), f) -> Tactic (kind, m, convert_forest f)
     | Node (TagMessage m, []) -> Message m
     | Node (TagMessage _, _) -> assert false
   and convert_forest f = Sequence (f |> List.map convert_tree)
@@ -198,7 +205,7 @@ module Info = struct
       let brs = brs |> List.map compress in
       let all_empty = brs |> List.for_all (fun e -> match e with Sequence [] -> true | _ -> false) in
       if all_empty then Sequence [] else Dispatch brs
-    | Tactic (m, c) -> Tactic (m, compress c)
+    | Tactic (kind, m, c) -> Tactic (kind, m, compress c)
     | Message m -> Message m
 
   let rec print = let open Pp in function
@@ -212,13 +219,13 @@ module Info = struct
       if brs = []
       then str "idtac"
       else str "[>" ++ spc () ++ (brs |> Pp.prlist_with_sep sep print) ++ spc () ++ str "]"
-    | Tactic (m, _) -> m ()
+    | Tactic (kind, m, _) -> m ()
     | Message m -> str "(* " ++ m () ++ str " *)"
 
   let rec collapse n = function
     | Sequence brs -> Sequence (brs |> List.map (collapse n))
     | Dispatch brs -> Dispatch (brs |> List.map (collapse n))
-    | Tactic (m, c) -> if n > 0 then collapse (n - 1) c else Tactic (m, Sequence [])
+    | Tactic (kind, m, c) -> if n > 0 then collapse (n - 1) c else Tactic (kind, m, Sequence [])
     | Message m -> Message m
 end
 

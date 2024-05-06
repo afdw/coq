@@ -48,14 +48,14 @@ type 'id message_token =
   | MsgInt of int
   | MsgIdent of 'id
 
-type ('dconstr,'id) induction_clause =
-    'dconstr with_bindings Tactics.destruction_arg *
+type ('dconstr,'dconstr_with_bindings,'id) induction_clause =
+    'dconstr_with_bindings Tactics.destruction_arg *
     (Namegen.intro_pattern_naming_expr CAst.t option (* eqn:... *)
     * 'dconstr or_and_intro_pattern_expr CAst.t or_var option) (* as ... *)
     * 'id clause_expr option (* in ... *)
 
-type ('constr,'dconstr,'id) induction_clause_list =
-    ('dconstr,'id) induction_clause list
+type ('constr,'dconstr,'dconstr_with_bindings,'id) induction_clause_list =
+    ('dconstr,'dconstr_with_bindings,'id) induction_clause list
     * 'constr with_bindings option (* using ... *)
 
 type 'a with_bindings_arg = clear_flag * 'a with_bindings
@@ -104,7 +104,7 @@ type intro_pattern_naming = Namegen.intro_pattern_naming_expr CAst.t
 type 'a gen_atomic_tactic_expr =
   (* Basic tactics *)
   | TacIntroPattern of evars_flag * 'dtrm intro_pattern_expr CAst.t list
-  | TacApply of advanced_flag * evars_flag * 'trm with_bindings_arg list *
+  | TacApply of advanced_flag * evars_flag * (clear_flag * 'dtrm_with_bindings) list *
       ('nam * 'dtrm intro_pattern_expr CAst.t option) list
   | TacElim of evars_flag * 'trm with_bindings_arg * 'trm with_bindings option
   | TacCase of evars_flag * 'trm with_bindings_arg
@@ -119,7 +119,7 @@ type 'a gen_atomic_tactic_expr =
 
   (* Derived basic tactics *)
   | TacInductionDestruct of
-      rec_flag * evars_flag * ('trm,'dtrm,'nam) induction_clause_list
+      rec_flag * evars_flag * ('trm,'dtrm,'dtrm_with_bindings,'nam) induction_clause_list
 
   (* Conversion *)
   | TacReduce of ('trm,'cst,'rpat,'occvar) red_expr_gen * 'nam clause_expr
@@ -127,19 +127,14 @@ type 'a gen_atomic_tactic_expr =
 
   (* Equality and inversion *)
   | TacRewrite of evars_flag *
-      (bool * Equality.multi * 'dtrm with_bindings_arg) list * 'nam clause_expr *
-      (* spiwack: using ['dtrm] here is a small hack, may not be
-         stable by a change in the representation of delayed
-         terms. Because, in fact, it is the whole "with_bindings"
-         which is delayed. But because the "t" level for ['dtrm] is
-         uninterpreted, it works fine here too, and avoid more
-         disruption of this file. *)
+      (bool * Equality.multi * (clear_flag * 'dtrm_with_bindings)) list * 'nam clause_expr *
       'tacexpr option
   | TacInversion of ('trm,'dtrm,'nam) inversion_strength * quantified_hypothesis
 
 constraint 'a = <
     term:'trm;
     dterm: 'dtrm;
+    dterm_with_bindings: 'dtrm_with_bindings;
     pattern:'pat;
     red_pattern:'rpat;
     constant:'cst;
@@ -165,6 +160,7 @@ type 'a gen_tactic_arg =
 constraint 'a = <
     term:'trm;
     dterm: 'dtrm;
+    dterm_with_bindings: 'dtrm_with_bindings;
     pattern:'pat;
     red_pattern:'rpat;
     constant:'cst;
@@ -243,6 +239,7 @@ and 'a gen_tactic_expr_r =
 constraint 'a = <
     term:'t;
     dterm: 'dtrm;
+    dterm_with_bindings: 'dtrm_with_bindings;
     pattern:'p;
     red_pattern:'rp;
     constant:'c;
@@ -259,6 +256,7 @@ and 'a gen_tactic_expr =
 constraint 'a = <
     term:'t;
     dterm: 'dtrm;
+    dterm_with_bindings: 'dtrm_with_bindings;
     pattern:'p;
     red_pattern:'rp;
     constant:'c;
@@ -275,6 +273,7 @@ and 'a gen_tactic_fun_ast =
 constraint 'a = <
     term:'t;
     dterm: 'dtrm;
+    dterm_with_bindings: 'dtrm_with_bindings;
     pattern:'p;
     red_pattern:'rp;
     constant:'c;
@@ -297,6 +296,7 @@ type g_occvar = int or_var
 type g_dispatch =  <
     term:g_trm;
     dterm:g_trm;
+    dterm_with_bindings:g_trm with_bindings;
     pattern:g_pat;
     red_pattern:g_trm;
     constant:g_cst;
@@ -326,6 +326,7 @@ type r_occvar = int or_var
 type r_dispatch =  <
     term:r_trm;
     dterm:r_trm;
+    dterm_with_bindings:r_trm with_bindings;
     pattern:r_pat;
     red_pattern:r_pat;
     constant:r_cst;
@@ -348,6 +349,8 @@ type raw_tactic_arg =
 (** Interpreted tactics *)
 
 type t_trm = EConstr.constr
+type t_dtrm = delayed_open_constr
+type t_dtrm_with_bindings = delayed_open_constr_with_bindings
 type t_pat = constr_pattern
 type t_cst = Evaluable.t
 type t_ref = ltac_constant located
@@ -356,14 +359,15 @@ type t_occvar = int
 
 type t_dispatch =  <
     term:t_trm;
-    dterm:g_trm;
+    dterm:t_dtrm;
+    dterm_with_bindings:t_dtrm_with_bindings;
     pattern:t_pat;
     red_pattern:t_pat;
     constant:t_cst;
     reference:t_ref;
     name:t_nam;
     occvar:t_occvar;
-    tacexpr:unit;
+    tacexpr:glob_tactic_expr;
     level:tlevel
 >
 
