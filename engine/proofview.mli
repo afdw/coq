@@ -293,11 +293,21 @@ module Trace : sig
   val new_deferred_placeholder : Proofview_monad.Info.deferred_id tactic
   val tag_dispatch : (tag_branch:tactic_wrapper -> 'a tactic) -> 'a tactic
   val message : Proofview_monad.Info.lazy_msg -> unit tactic
-  val tag_tactic : Proofview_monad.Info.lazy_msg -> 'a tactic -> 'a tactic
+  val tag_tactic : Proofview_monad.Info.tactic_kind -> Proofview_monad.Info.lazy_msg -> 'a tactic -> 'a tactic
 
   val pr_info : ?lvl:int -> Proofview_monad.Info.trace -> Pp.t
 end
 
+module Tagged : sig
+  type 'a t = {
+    deferred_id : Proofview_monad.Info.deferred_id;
+    v : 'a;
+  }
+
+  val make : Proofview_monad.Info.deferred_id -> 'a -> 'a t
+
+  val map : ('a -> 'b) -> 'a t -> 'b t
+end
 
 (** {7 Dispatching on goals} *)
 

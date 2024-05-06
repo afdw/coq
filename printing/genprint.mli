@@ -28,6 +28,8 @@ type top_printer_result =
 | TopPrinterNeedsContext of (Environ.env -> Evd.evar_map -> Pp.t)
 | TopPrinterNeedsContextAndLevel of printer_fun_with_level with_level
 
+val printer_result_of_top_printer_result : top_printer_result -> printer_result
+
 type 'a printer = 'a -> printer_result
 
 type 'a top_printer = 'a -> top_printer_result
