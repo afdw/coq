@@ -54,7 +54,8 @@ let pr_fun_ind_using_typed prc prlc _ opt_c =
 
 ARGUMENT EXTEND fun_ind_using
   TYPED AS constr_with_bindings option
-  PRINTED BY { pr_fun_ind_using_typed }
+  PRINTED BY { fun _ _ _ x -> pr_fun_ind_using env sigma (fun env sigma -> Pptactic.pr_and_constr_expr (Printer.pr_glob_constr_env env sigma))
+      (fun env sigma -> Pptactic.pr_and_constr_expr (Printer.pr_lglob_constr_env env sigma)) () (Option.map fst x) }
   RAW_PRINTED BY { pr_fun_ind_using env sigma }
   GLOB_PRINTED BY { pr_fun_ind_using env sigma }
 | [ "using" constr_with_bindings(c) ] -> { Some c }
@@ -84,7 +85,7 @@ let out_disjunctive = CAst.map (function
 }
 
 ARGUMENT EXTEND with_names TYPED AS intro_pattern option
-  PRINTED BY { fun prc _ _ -> pr_intro_as_pat (fun c -> prc env sigma @@ snd @@ c env sigma) }
+  PRINTED BY { fun prc _ _ x -> pr_intro_as_pat (Pptactic.pr_and_constr_expr (Printer.pr_glob_constr_env env sigma)) (Option.map fst x) }
   RAW_PRINTED BY { fun prc _ _ -> pr_intro_as_pat (prc env sigma) }
   GLOB_PRINTED BY { fun prc _ _ -> pr_intro_as_pat (prc env sigma) }
 | [ "as"  simple_intropattern(ipat) ] -> { Some ipat }
@@ -102,7 +103,7 @@ TACTIC EXTEND newfunind
 | ["functional" "induction" lconstr(c) fun_ind_using(princl) with_names(pat)] ->
    {
      (Ltac_plugin.Internals.onSomeWithHoles
-          (fun x -> functional_induction true c x pat) princl)
+          (fun x -> functional_induction true c x (Option.map snd pat)) (Option.map snd princl))
    }
 
 END
@@ -115,7 +116,7 @@ TACTIC EXTEND snewfunind
          | [c] -> c
          | c::cl -> EConstr.applist(c,cl)
        in
-       Ltac_plugin.Internals.onSomeWithHoles (fun x -> functional_induction false c x pat) princl }
+       Ltac_plugin.Internals.onSomeWithHoles (fun x -> functional_induction false c x (Option.map snd pat)) (Option.map snd princl) }
 END
 
 {
