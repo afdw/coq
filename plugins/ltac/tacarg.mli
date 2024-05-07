@@ -17,29 +17,29 @@ open Tacexpr
 
 (** Tactic related witnesses, could also live in tactics/ if other users *)
 (* To keep after deprecation phase but it will get a different parsing semantics in pltac.ml *)
-val wit_intropattern : (constr_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t, intro_pattern) genarg_type
+val wit_intropattern : (constr_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t * intro_pattern) genarg_type
 [@@ocaml.deprecated "Use wit_simple_intropattern"]
 
-val wit_simple_intropattern : (constr_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t, intro_pattern) genarg_type
+val wit_simple_intropattern : (constr_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t * intro_pattern) genarg_type
 
-val wit_intro_pattern : (constr_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t, intro_pattern) genarg_type
+val wit_intro_pattern : (constr_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t, glob_constr_and_expr intro_pattern_expr CAst.t * intro_pattern) genarg_type
 
 val wit_quant_hyp : quantified_hypothesis uniform_genarg_type
 
 val wit_constr_with_bindings :
   (constr_expr with_bindings,
   glob_constr_and_expr with_bindings,
-  constr with_bindings delayed_open) genarg_type
+  glob_constr_and_expr with_bindings * constr with_bindings delayed_open) genarg_type
 
 val wit_open_constr_with_bindings :
   (constr_expr with_bindings,
   glob_constr_and_expr with_bindings,
-  constr with_bindings delayed_open) genarg_type
+  glob_constr_and_expr with_bindings * constr with_bindings delayed_open) genarg_type
 
 val wit_bindings :
   (constr_expr bindings,
   glob_constr_and_expr bindings,
-  constr bindings delayed_open) genarg_type
+  glob_constr_and_expr bindings * constr bindings delayed_open) genarg_type
 
 val wit_quantified_hypothesis : quantified_hypothesis uniform_genarg_type
 
@@ -55,5 +55,5 @@ val wit_ltac : (raw_tactic_expr, glob_tactic_expr, unit) genarg_type
 val wit_destruction_arg :
   (constr_expr with_bindings Tactics.destruction_arg,
    glob_constr_and_expr with_bindings Tactics.destruction_arg,
-   delayed_open_constr_with_bindings Tactics.destruction_arg) genarg_type
+   glob_constr_and_expr with_bindings Tactics.destruction_arg * delayed_open_constr_with_bindings Tactics.destruction_arg) genarg_type
 

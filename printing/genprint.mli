@@ -30,6 +30,8 @@ type top_printer_result =
 
 val printer_result_of_top_printer_result : top_printer_result -> printer_result
 
+val top_printer_result_of_printer_result : printer_result -> top_printer_result
+
 type 'a printer = 'a -> printer_result
 
 type 'a top_printer = 'a -> top_printer_result
