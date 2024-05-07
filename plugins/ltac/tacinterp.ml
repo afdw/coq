@@ -321,7 +321,7 @@ let coerce_to_tactic loc id v =
 
 let intro_pattern_of_ident id = CAst.make @@ IntroNaming (IntroIdentifier id)
 let value_of_ident id =
-  in_gen (topwit wit_intro_pattern) (intro_pattern_of_ident id)
+  in_gen (topwit wit_intro_pattern) (intro_pattern_of_ident id, intro_pattern_of_ident id)
 
 let (+++) lfun1 lfun2 = Id.Map.fold Id.Map.add lfun1 lfun2
 
@@ -516,7 +516,7 @@ let rec intropattern_ids accu {loc;v=pat} = match pat with
 let extract_ids ids lfun accu =
   let fold id v accu =
     if has_type v (topwit wit_intro_pattern) then
-      let {v=ipat} = out_gen (topwit wit_intro_pattern) v in
+      let _, {v=ipat} = out_gen (topwit wit_intro_pattern) v in
       if Id.List.mem id ids then accu
       else intropattern_ids accu (CAst.make ipat)
     else accu
@@ -1019,7 +1019,7 @@ let interp_destruction_arg ist gl arg =
         if has_type v (topwit wit_intro_pattern) then
           let v = out_gen (topwit wit_intro_pattern) v in
           match v with
-          | {v=IntroNaming (IntroIdentifier id)} -> try_cast_id id
+          | _, {v=IntroNaming (IntroIdentifier id)} -> try_cast_id id
           | _ -> error ()
         else if has_type v (topwit wit_hyp) then
           let id = out_gen (topwit wit_hyp) v in
@@ -1469,7 +1469,7 @@ and interp_tacarg_ftactic ist arg : TaggedVal.t Ftactic.t =
           Ftactic.return (
             TaggedVal.make
               deferred_id
-              (in_gen (topwit wit_intro_pattern) (CAst.make @@ IntroNaming (IntroIdentifier id)))
+              (in_gen (topwit wit_intro_pattern) (CAst.make @@ IntroNaming (IntroIdentifier id), CAst.make @@ IntroNaming (IntroIdentifier id)))
           )
         )
       end
@@ -2375,6 +2375,11 @@ let lifts f = (); fun ist x ->
     )
   )
 
+let with_copied_input f = (); fun ist x ->
+  let (>>=) = Ftactic.bind in
+  f ist x >>= fun x_interp ->
+  Ftactic.return (Proofview.Tagged.make x_interp.Proofview.Tagged.deferred_id (x, x_interp.Proofview.Tagged.v))
+
 let interp_bindings' ist bl =
   Ftactic.return (Proofview.Tagged.make ist.deferred_id (fun env sigma ->
     interp_bindings ist env sigma bl
@@ -2409,18 +2414,18 @@ let () =
   register_interp0 wit_pre_ident (lift interp_pre_ident);
   register_interp0 wit_ident (lift interp_ident);
   register_interp0 wit_hyp (lift interp_hyp);
-  register_interp0 wit_intropattern (lift interp_intro_pattern) [@warning "-3"];
-  register_interp0 wit_simple_intropattern (lift interp_intro_pattern);
+  register_interp0 wit_intropattern (with_copied_input (lift interp_intro_pattern)) [@warning "-3"];
+  register_interp0 wit_simple_intropattern (with_copied_input (lift interp_intro_pattern));
   register_interp0 wit_clause_dft_concl (lift interp_clause);
   register_interp0 wit_constr (lifts interp_constr);
   register_interp0 wit_tacvalue (fun ist v -> Ftactic.return (Proofview.Tagged.make ist.deferred_id v));
   register_interp0 Redexpr.wit_red_expr (lifts interp_red_expr);
   register_interp0 wit_quant_hyp (lift interp_declared_or_quantified_hypothesis);
   register_interp0 wit_open_constr (lifts interp_open_constr);
-  register_interp0 wit_bindings interp_bindings';
-  register_interp0 wit_constr_with_bindings interp_constr_with_bindings';
-  register_interp0 wit_open_constr_with_bindings interp_open_constr_with_bindings';
-  register_interp0 wit_destruction_arg interp_destruction_arg';
+  register_interp0 wit_bindings (with_copied_input interp_bindings');
+  register_interp0 wit_constr_with_bindings (with_copied_input interp_constr_with_bindings');
+  register_interp0 wit_open_constr_with_bindings (with_copied_input interp_open_constr_with_bindings');
+  register_interp0 wit_destruction_arg (with_copied_input interp_destruction_arg');
   ()
 
 let () =

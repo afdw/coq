@@ -1337,8 +1337,8 @@ let () =
     (pr_or_by_notation pr_qualid) (pr_or_var (pr_located pr_global)) pr_global;
   register_basic_print0 wit_ident pr_id pr_id pr_id;
   register_basic_print0 wit_hyp pr_lident pr_lident pr_id;
-  register_print0 wit_intropattern pr_raw_intro_pattern pr_glob_intro_pattern pr_intro_pattern_env [@warning "-3"];
-  register_print0 wit_simple_intropattern pr_raw_intro_pattern pr_glob_intro_pattern pr_intro_pattern_env;
+  register_print0 wit_intropattern pr_raw_intro_pattern pr_glob_intro_pattern (fst %> pr_glob_intro_pattern %> Genprint.top_printer_result_of_printer_result) [@warning "-3"];
+  register_print0 wit_simple_intropattern pr_raw_intro_pattern pr_glob_intro_pattern (fst %> pr_glob_intro_pattern %> Genprint.top_printer_result_of_printer_result);
   Genprint.register_print0
     wit_clause_dft_concl
     (lift (pr_clauses (Some true) pr_lident))
@@ -1378,25 +1378,28 @@ let () =
     (lift_env (fun env sigma -> Miscprint.pr_bindings_no_with (pr_constr_expr env sigma)
                   (pr_lconstr_expr env sigma)))
     (lift_env (fun env sigma -> Miscprint.pr_bindings_no_with (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma) (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)))
-    pr_bindings_env
+    (lift_env (fun env sigma -> fst %> Miscprint.pr_bindings_no_with (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma) (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)) %> Genprint.top_printer_result_of_printer_result)
   ;
   register_print0 wit_constr_with_bindings
     (lift_env (fun env sigma -> pr_with_bindings (pr_constr_expr env sigma) (pr_lconstr_expr env sigma)))
     (lift_env (fun env sigma -> pr_with_bindings (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
               (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)))
-    pr_with_bindings_env
+    (lift_env (fun env sigma -> fst %> pr_with_bindings (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
+              (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)) %> Genprint.top_printer_result_of_printer_result)
   ;
   register_print0 wit_open_constr_with_bindings
     (lift_env (fun env sigma -> pr_with_bindings (pr_constr_expr env sigma) (pr_lconstr_expr env sigma)))
     (lift_env (fun env sigma -> pr_with_bindings (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
                   (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)))
-    pr_with_bindings_env
+    (lift_env (fun env sigma -> fst %> pr_with_bindings (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
+                  (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)) %> Genprint.top_printer_result_of_printer_result)
   ;
   register_print0 Tacarg.wit_destruction_arg
     (lift_env (fun env sigma -> pr_destruction_arg (pr_constr_expr env sigma) (pr_lconstr_expr env sigma)))
     (lift_env (fun env sigma -> pr_destruction_arg (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
                   (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)))
-    pr_destruction_arg_env
+    (lift_env (fun env sigma -> fst %> pr_destruction_arg (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
+                  (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma)) %> Genprint.top_printer_result_of_printer_result)
   ;
   register_basic_print0 Stdarg.wit_int int int int;
   register_basic_print0 Stdarg.wit_bool pr_bool pr_bool pr_bool;

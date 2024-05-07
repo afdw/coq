@@ -170,3 +170,5 @@ val make_constr_printer : (env -> Evd.evar_map -> entry_relative_level -> 'a -> 
   'a Genprint.top_printer
 
 val ssr_loaded_hook : (unit -> bool) -> unit
+
+val pr_and_constr_expr : ('a -> 'b) -> 'a * 'c -> 'b
