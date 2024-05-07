@@ -167,7 +167,7 @@ let coerce_to_constr_context v =
 
 let is_intro_pattern v =
   if has_type v (topwit wit_intro_pattern) then
-    Some (out_gen (topwit wit_intro_pattern) v).CAst.v
+    Some (snd (out_gen (topwit wit_intro_pattern) v)).CAst.v
   else
     None
 
@@ -180,7 +180,7 @@ let coerce_var_to_ident fresh env sigma v =
   | None ->
   if has_type v (topwit wit_intro_pattern) then
     match out_gen (topwit wit_intro_pattern) v with
-    | { CAst.v=IntroNaming (IntroIdentifier id)} -> id
+    | _, { CAst.v=IntroNaming (IntroIdentifier id)} -> id
     | _ -> fail ()
   else if has_type v (topwit wit_hyp) then
     out_gen (topwit wit_hyp) v
