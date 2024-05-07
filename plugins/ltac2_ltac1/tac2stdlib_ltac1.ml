@@ -43,7 +43,7 @@ let out_gen wit v = prj (val_tag wit) v
 let () =
   define "ltac1_of_intro_pattern" (Tac2stdlib.intro_pattern @-> ret ltac1) @@ fun v ->
   let v = Tac2tactics.mk_intro_pattern v in
-  in_gen (topwit Ltac_plugin.Tacarg.wit_simple_intropattern) v
+  in_gen (topwit Ltac_plugin.Tacarg.wit_simple_intropattern) (CAst.make (Tactypes.IntroForthcoming false) (* FIXME *), v)
 
 let rec to_intro_pattern (v : Tactypes.intro_pattern) : Tac2types.intro_pattern =
   match v.CAst.v with
@@ -85,6 +85,6 @@ let () =
      semantics are different: it also handles wit_hyp and Var constr *)
   match out_gen (topwit Ltac_plugin.Tacarg.wit_simple_intropattern) v with
   | None -> None
-  | Some v ->
+  | Some (_, v) ->
     let v = to_intro_pattern v in
     Some v
