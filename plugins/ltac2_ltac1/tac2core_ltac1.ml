@@ -47,13 +47,12 @@ let () =
         List.hd (Tacenv.locate_extended_all_tactic (Libnames.qualid_of_path fp))
       else raise Not_found
   in
-  Tacinterp.Value.of_closure (Tacinterp.default_ist Proofview_monad.Info.fake_deferred_id) (Tacenv.interp_ltac r)
+  Tacinterp.Value.of_closure (Tacinterp.default_ist ()) (Tacenv.interp_ltac r)
 
 let () =
   define "ltac1_run" (ltac1 @-> tac unit) @@ fun v ->
   let open Ltac_plugin in
-  Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-  Tacinterp.tactic_of_value (Tacinterp.default_ist deferred_id) v
+  Tacinterp.tactic_of_value (Tacinterp.default_ist ()) v
 
 let () =
   define "ltac1_apply" (ltac1 @-> list ltac1 @-> closure @-> tac unit) @@ fun f args k ->
@@ -65,7 +64,6 @@ let () =
       Proofview.tclIGNORE (Tac2val.apply k [Tac2ffi.of_ext val_ltac1 ret.Proofview.Tagged.v])
     )
   in
-  Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
   let fold arg (i, vars, lfun) =
     let id = Id.of_string ("x" ^ string_of_int i) in
     let x = Reference (ArgVar CAst.(make id)) in
@@ -73,7 +71,7 @@ let () =
   in
   let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
   let lfun = Id.Map.add (Id.of_string "F") f lfun in
-  let ist = { (Tacinterp.default_ist deferred_id) with Tacinterp.lfun = lfun; } in
+  let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun = lfun; } in
   let tac = CAst.make @@ TacArg (TacCall (CAst.make (ArgVar CAst.(make @@ Id.of_string "F"),args))) in
   Tacinterp.val_interp ist tac k
 
@@ -151,8 +149,7 @@ let () =
       let lfun = List.fold_left2 add Id.Map.empty ids args in
       let ist = { env_ist = Id.Map.empty } in
       let lfun = Tac2interp.set_env ist lfun in
-      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-      let ist = Ltac_plugin.Tacinterp.default_ist deferred_id in
+      let ist = Ltac_plugin.Tacinterp.default_ist () in
       let ist = { ist with Geninterp.lfun = lfun } in
       let tac = (Ltac_plugin.Tacinterp.eval_tactic_ist ist tac : unit Proofview.tactic) in
       tac >>= fun () ->
@@ -211,7 +208,7 @@ let () =
       let lfun = List.fold_left2 add Id.Map.empty ids args in
       let ist = { env_ist = Id.Map.empty } in
       let lfun = Tac2interp.set_env ist lfun in
-      let ist = Ltac_plugin.Tacinterp.default_ist Proofview_monad.Info.fake_deferred_id in
+      let ist = Ltac_plugin.Tacinterp.default_ist () in
       let ist = { ist with Geninterp.lfun = lfun } in
       return (Tac2ffi.of_ext val_ltac1 (Tacinterp.Value.of_closure ist tac))
     in
@@ -294,7 +291,7 @@ let () =
   let clos = CAst.make (Tacexpr.TacFun ([Name arg_id], CAst.make (Tacexpr.TacArg body))) in
   let f = Geninterp.Val.inject (Geninterp.Val.Base typ_ltac2) f in
   let lfun = Id.Map.singleton tac_id f in
-  let ist = { (Tacinterp.default_ist Proofview_monad.Info.fake_deferred_id) with Tacinterp.lfun } in
+  let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun } in
   Tacinterp.Value.of_closure ist clos
 
 let ltac2_eval =

@@ -153,5 +153,5 @@ val interp_ident : interp_sign -> Environ.env -> Evd.evar_map -> Id.t -> Id.t
 val interp_intro_pattern : interp_sign -> Environ.env -> Evd.evar_map ->
   glob_constr_and_expr intro_pattern_expr CAst.t -> intro_pattern
 
-val default_ist : Proofview_monad.Info.deferred_id -> Geninterp.interp_sign
+val default_ist : unit -> Geninterp.interp_sign
 (** Empty ist with debug set on the current value. *)

@@ -1180,8 +1180,7 @@ and interp_tactic ist tac : unit Proofview.tactic =
 
 and eval_tactic_ist ist tac : unit Proofview.tactic =
   Feedback.msg_info Pp.(str "eval_tactic_ist " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac with e when CErrors.noncritical e -> Pp.str "!?!");
-  let deferred_id = ist.deferred_id in
-  let ist = {ist with deferred_id = Proofview_monad.Info.fake_deferred_id} in
+  assert (ist.deferred_id = Proofview_monad.Info.fake_deferred_id);
   let loc = tac.loc in
   let tac_interp =
   match tac.v with
@@ -1353,10 +1352,7 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
         let tac_interp = Proofview.Trace.tag_deferred_contents deferred_id (catch_error_tac_loc loc stack (opn_interp args_interp ist)) in
         Ftactic.return tac_interp in
       Ftactic.run tac_f (fun tac_interp -> tac_interp) in
-  Proofview.Trace.tag_deferred_contents deferred_id (
-    wrap_populate_late_arg top_late_arg tac
-      tac_interp
-  )
+  wrap_populate_late_arg top_late_arg tac tac_interp
 
 and force_vrec_ftactic ist v : TaggedVal.t Ftactic.t =
   if has_type v (topwit wit_tacvalue) then
@@ -1587,6 +1583,7 @@ and tactic_of_value ist vle =
       Pptactic.pr_value ~context:(env, sigma) Pptactic.ltop vle in
     str "<" ++ Val.pr tag ++ str ":(" ++ pr_v ++ str ")>"
   ) with e when CErrors.noncritical e -> Pp.str "!?!");
+  assert (ist.deferred_id = Proofview_monad.Info.fake_deferred_id);
   if has_type vle (topwit wit_tacvalue) then
   match to_tacvalue vle with
   | VFun (appl,trace,loc,lfun,[],t) ->
@@ -1649,7 +1646,7 @@ and tactic_of_value ist vle =
 
 and tactic_of_tagged_value ist vle =
   assert (ist.deferred_id = Proofview_monad.Info.fake_deferred_id);
-  tactic_of_value {ist with deferred_id = vle.Proofview.Tagged.deferred_id} vle.Proofview.Tagged.v
+  Proofview.Trace.tag_deferred_contents vle.Proofview.Tagged.deferred_id (tactic_of_value ist vle.Proofview.Tagged.v)
 
 (* Interprets the clauses of a recursive LetIn *)
 and interp_letrec ist llc u =
@@ -1706,13 +1703,12 @@ and interp_match_success ist { Tactic_matching.subst ; context ; terms ; lhs } =
   | VFun (appl,trace,loc,lfun,[],t) ->
     Proofview.Trace.tag_deferred_contents v.Proofview.Tagged.deferred_id (
       let ist =
-        { ist with
-          lfun
+        { deferred_id = Proofview_monad.Info.fake_deferred_id
+        ; lfun
         ; poly
         ; extra = TacStore.set ist.extra f_trace trace
         } in
-      Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-      let tac = eval_tactic_ist {ist with deferred_id} t in
+      let tac = eval_tactic_ist ist t in
       let (stack, _) = trace in
       let (>>=) = Ftactic.bind in
       catch_error_tac stack (
@@ -1937,6 +1933,7 @@ and interp_ltac_constr ist c k =
 
 (* Interprets a primitive tactic *)
 and interp_atomic ist tac : unit Proofview.tactic =
+  assert (ist.deferred_id = Proofview_monad.Info.fake_deferred_id);
   match tac with
   (* Basic tactics *)
   | TacIntroPattern (ev,l) ->
@@ -2202,9 +2199,9 @@ and interp_atomic ist tac : unit Proofview.tactic =
 
 (* Initial call for interpretation *)
 
-let default_ist deferred_id =
+let default_ist () =
   let extra = TacStore.set TacStore.empty f_debug (get_debug ()) in
-  let ist = { deferred_id; lfun = Id.Map.empty; poly = false; extra = extra } in
+  let ist = { deferred_id = Proofview_monad.Info.fake_deferred_id; lfun = Id.Map.empty; poly = false; extra = extra } in
   let ist = set_current_late_arg ist top_late_arg in
   ist
 
@@ -2212,15 +2209,13 @@ let eval_tactic t =
   if get_debug () <> DebugOff then
     Proofview.tclUNIT () >>= fun () -> (* delay for [default_ist] *)
     Proofview.tclLIFT (db_initialize true) <*>
-    Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-    let ist = default_ist deferred_id in
+    let ist = default_ist () in
     assign_late_arg print_late_arg top_late_arg <*>
     populate_current_late_arg ist t <*>
     eval_tactic_ist ist t
   else
     Proofview.tclUNIT () >>= fun () -> (* delay for [default_ist] *)
-    Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-    let ist = default_ist deferred_id in
+    let ist = default_ist () in
     assign_late_arg print_late_arg top_late_arg <*>
     populate_current_late_arg ist t <*>
     eval_tactic_ist ist t
@@ -2239,7 +2234,7 @@ module Value = struct
     let closure = VFun (UnnamedAppl, extract_trace ist, None, ist.lfun, [], tac) in
     of_tacvalue closure
 
-  let apply_expr deferred_id f args =
+  let apply_expr f args =
     let fold arg (i, vars, lfun) =
       let id = Id.of_string ("x" ^ string_of_int i) in
       let x = Reference (ArgVar CAst.(make id)) in
@@ -2247,19 +2242,17 @@ module Value = struct
     in
     let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
     let lfun = Id.Map.add (Id.of_string "F") f lfun in
-    let ist = { (default_ist deferred_id) with lfun = lfun; } in
+    let ist = { (default_ist ()) with lfun = lfun; } in
     ist, CAst.make @@ TacArg (TacCall (CAst.make (ArgVar CAst.(make @@ Id.of_string "F"),args)))
 
 
   (** Apply toplevel tactic values *)
   let apply (f : value) (args: value list) =
-    Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-    let ist, tac = apply_expr deferred_id f args in
+    let ist, tac = apply_expr f args in
     eval_tactic_ist ist tac
 
   let apply_val (f : value) (args: value list) =
-    Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-    let ist, tac = apply_expr deferred_id f args in
+    let ist, tac = apply_expr f args in
     val_interp_ftactic ist tac
 
 end
@@ -2270,11 +2263,10 @@ end
 let interp_tac_gen lfun avoid_ids debug t =
   Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
   Proofview.Goal.enter begin fun gl ->
-  Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
   let env = Proofview.Goal.env gl in
   let extra = TacStore.set TacStore.empty f_debug debug in
   let extra = TacStore.set extra f_avoid_ids avoid_ids in
-  let ist = { deferred_id; lfun; poly; extra } in
+  let ist = { deferred_id = Proofview_monad.Info.fake_deferred_id; lfun; poly; extra } in
   let ltacvars = Id.Map.domain lfun in
   eval_tactic_ist ist
     (intern_pure_tactic { (Genintern.empty_glob_sign ~strict:false env) with ltacvars } t)
@@ -2434,10 +2426,12 @@ let () =
 
 let () =
   let interp ist tac =
-    eval_tactic_ist ist tac >>= fun () ->
-    let (>>=) = Ftactic.bind in
-    Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-    Ftactic.return (Proofview.Tagged.make deferred_id ()) in
+    Proofview.Trace.tag_deferred_contents ist.deferred_id (
+      eval_tactic_ist {ist with deferred_id = Proofview_monad.Info.fake_deferred_id} tac >>= fun () ->
+      let (>>=) = Ftactic.bind in
+      Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+      Ftactic.return (Proofview.Tagged.make deferred_id ())
+    ) in
   register_interp0 wit_ltac interp
 
 let () =
@@ -2451,7 +2445,7 @@ let () =
   )
 
 let interp_redexp env sigma r =
-  let ist = default_ist Proofview_monad.Info.fake_deferred_id in
+  let ist = default_ist () in
   let gist = Genintern.empty_glob_sign ~strict:true env in
   interp_red_expr ist env sigma (intern_red_expr gist r)
 
@@ -2461,10 +2455,9 @@ let interp_redexp env sigma r =
 let _ =
   let eval ?loc ~poly env sigma tycon tac =
     let tac =
-      Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
       let lfun = GlobEnv.lfun env in
       let extra = TacStore.set TacStore.empty f_debug (get_debug ()) in
-      let ist = { deferred_id; lfun; poly; extra; } in
+      let ist = { deferred_id = Proofview_monad.Info.fake_deferred_id; lfun; poly; extra; } in
       eval_tactic_ist ist tac in
     (* EJGA: We should also pass the proof name if desired, for now
        poly seems like enough to get reasonable behavior in practice
