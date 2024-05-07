@@ -112,6 +112,11 @@ let printer_result_of_top_printer_result pr =
   | TopPrinterNeedsContext pr -> PrinterBasic pr
   | TopPrinterNeedsContextAndLevel pr -> PrinterNeedsLevel pr
 
+let top_printer_result_of_printer_result pr =
+  match pr with
+  | PrinterBasic pr -> TopPrinterNeedsContext pr
+  | PrinterNeedsLevel pr -> TopPrinterNeedsContextAndLevel pr
+
 (* Printing generic arguments *)
 
 type ('raw, 'glb, 'top) genprinter = {
