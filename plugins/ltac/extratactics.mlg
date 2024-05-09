@@ -715,3 +715,7 @@ TACTIC EXTEND with_strategy
   with_set_strategy [(v, q)] (Tacinterp.tactic_of_value ist tac)
 }
 END
+
+TACTIC EXTEND test
+| [ "test" ] -> { Internals.tclTEST }
+END
