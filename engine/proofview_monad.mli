@@ -63,13 +63,17 @@ module Info : sig
     | ML of Pp.t
     [@@deriving yojson { variants = `Adjacent ("tag", "contents") }]
 
+  type saved_proofview = Evd.evar_map * Evar.t list
+
+  val empty_saved_proofview : saved_proofview
+
   (** The type of the tags for [Info]. *)
   type tag =
     | TagDeferredContents of deferred_id
     | TagDeferredPlaceholder of deferred_id
-    | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
+    | TagDispatch of saved_proofview (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
     | TagDispatchBranch (** A marker to delimit an individual branch of [TagDispatch]. *)
-    | TagTactic of tactic_kind * lazy_msg (** A tactic call. *)
+    | TagTactic of saved_proofview * saved_proofview ref * tactic_kind * lazy_msg (** A tactic call. *)
     | TagMessage of lazy_msg (** A message by [TacId]. *)
 
   type state = tag incr
@@ -77,8 +81,8 @@ module Info : sig
 
   type trace =
     | Sequence of trace list (** A sequence. *)
-    | Dispatch of trace list (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
-    | Tactic of tactic_kind * lazy_msg * trace (** A tactic call, with its execution detailed. *)
+    | Dispatch of saved_proofview * trace list (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
+    | Tactic of saved_proofview * saved_proofview * tactic_kind * lazy_msg * trace (** A tactic call, with its execution detailed. *)
     | Message of lazy_msg (** A message by [TacId]. *)
 
   val finish : pretrace -> trace
