@@ -438,7 +438,7 @@ let tclFOCUSID ?(nosuchgoal=tclZERO (NoSuchGoals 1)) id t =
 (** {6 Trace} *)
 
 module Trace = struct
-  let record_info_trace = InfoL.record_trace
+  let with_recording = InfoL.with_recording
 
   type tactic_wrapper = {wrap : 'a. 'a tactic -> 'a tactic}
 
