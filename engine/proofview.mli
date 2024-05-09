@@ -284,6 +284,13 @@ module Trace : sig
 
   type tactic_wrapper = {wrap : 'a. 'a tactic -> 'a tactic}
 
+  val id_tactic_wrapper : tactic_wrapper
+  val compose_tactic_wrappers : tactic_wrapper -> tactic_wrapper -> tactic_wrapper
+
+  val tag_deferred_contents : Proofview_monad.Info.deferred_id -> 'a tactic -> 'a tactic
+  val tag_new_deferred_contents : (Proofview_monad.Info.deferred_id -> 'a tactic) -> 'a tactic
+  val deferred_placeholder : Proofview_monad.Info.deferred_id -> unit tactic
+  val new_deferred_placeholder : Proofview_monad.Info.deferred_id tactic
   val tag_dispatch : (tag_branch:tactic_wrapper -> 'a tactic) -> 'a tactic
   val message : Proofview_monad.Info.lazy_msg -> unit tactic
   val tag_tactic : Proofview_monad.Info.lazy_msg -> 'a tactic -> 'a tactic

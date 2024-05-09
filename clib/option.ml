@@ -146,6 +146,10 @@ let default a = function
   | Some y -> y
   | _ -> a
 
+let to_list = function
+  | Some x -> [x]
+  | None -> []
+
 (** {6 Smart operations} *)
 
 module Smart =
