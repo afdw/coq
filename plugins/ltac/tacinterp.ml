@@ -1161,6 +1161,8 @@ and val_interp ist tac k =
 and interp_tactic ist tac : unit Proofview.tactic =
   val_interp ist tac (fun v -> tactic_of_tagged_value ist v)
 
+and stop_list = ["tauto"; "btauto"; "ring"; "ring_simplify"; "field"; "field_simplify"; "lia"; "nia"; "lra"; "nra"; "psatz"; "nsatz"]
+
 and eval_tactic_ist ist tac : unit Proofview.tactic =
   debug_tacinterp (fun () -> Pp.(str "eval_tactic_ist " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac with e when CErrors.noncritical e -> str "!?!"));
   let ist = set_current_late_arg ist top_late_arg in
@@ -1301,8 +1303,12 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           let trace = push_trace (loc, LtacNotationCall s) ist in
           let lfun = List.fold_right2 Id.Map.add s_interp.alias_args args_interp ist.lfun in
           let ist = {lfun; poly; extra = add_extra_loc loc (add_extra_trace trace ist.extra)} in
-          val_interp_ftactic deferred_id ist s_interp.alias_body >>= fun v ->
+          val_interp_ftactic deferred_id  ist s_interp.alias_body >>= fun v ->
           let tac_interp = tactic_of_tagged_value ist v in
+          let tac_interp =
+            if stop_list |> List.exists (fun t -> String.string_contains ~where:(Pptactic.pr_alias_key s |> Pp.simple_string_of_ppcmds) ~what:t)
+            then Proofview.Trace.with_recording false tac_interp
+            else tac_interp in
           Ftactic.return tac_interp in
         Ftactic.run tac_f (fun tac_interp -> tac_interp)
       else
@@ -1332,6 +1338,10 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
         let args_interp = List.rev args_interp in
         let (stack, _) = trace in
         let tac_interp = Proofview.Trace.tag_deferred_contents deferred_id (catch_error_tac_loc loc stack (opn_interp args_interp ist)) in
+        let tac_interp =
+          if stop_list |> List.exists (fun t -> String.string_contains ~where:(Pptactic.pr_extend_name opn |> Pp.simple_string_of_ppcmds) ~what:t)
+          then Proofview.Trace.with_recording false tac_interp
+          else tac_interp in
         Ftactic.return tac_interp in
       Ftactic.run tac_f (fun tac_interp -> tac_interp) in
   wrap_populate_late_arg top_late_arg tac tac_interp
