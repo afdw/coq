@@ -98,6 +98,8 @@ val fold_right_map : ('b -> 'a -> 'c * 'a) -> 'b option -> 'a -> 'c option * 'a
 (** [cata f e x] is [e] if [x] is [None] and [f a] if [x] is [Some a] *)
 val cata : ('a -> 'b) -> 'b -> 'a option -> 'b
 
+val to_list : 'a option -> 'a list
+
 (** {6 More Specific Operations} *)
 
 (** [default a x] is [y] if [x] is [Some y] and [a] otherwise. *)
