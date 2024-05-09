@@ -459,11 +459,20 @@ module Trace = struct
     InfoL.leaf (Info.TagDeferredPlaceholder deferred_id) >>
     tclUNIT deferred_id
   let tag_dispatch f =
-    InfoL.tag Info.TagDispatch (
-      f ~tag_branch:{wrap = fun t -> InfoL.tag Info.TagDispatchBranch t}
-    )
+    let open Proof in
+    Pv.get >>= fun step_before ->
+    let saved_proofview_before = (step_before.solution, step_before.comb |> CList.map drop_state |> CList.map_filter (Evarutil.advance step_before.solution)) in
+    InfoL.tag (Info.TagDispatch saved_proofview_before) (f ~tag_branch:{wrap = fun t -> InfoL.tag Info.TagDispatchBranch t})
   let message m = InfoL.leaf (Info.TagMessage m)
-  let tag_tactic k m t = InfoL.tag (Info.TagTactic (k, m)) t
+  let tag_tactic k m t =
+    let open Proof in
+    Pv.get >>= fun step_before ->
+    let saved_proofview_before = (step_before.solution, step_before.comb |> CList.map drop_state |> CList.map_filter (Evarutil.advance step_before.solution)) in
+    let saved_proofview_after = ref Info.empty_saved_proofview in
+    InfoL.tag (Info.TagTactic (saved_proofview_before, saved_proofview_after, k, m)) t >>= fun r ->
+    Pv.get >>= fun step_after ->
+    saved_proofview_after := (step_after.solution, step_after.comb |> CList.map drop_state |> CList.map_filter (Evarutil.advance step_before.solution));
+    tclUNIT r
 
   let pr_info ?(lvl=0) info =
     assert (lvl >= 0);
