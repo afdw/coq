@@ -48,12 +48,18 @@ end
 module Info : sig
   open TraceBuilder
 
+  type deferred_id
+
+  val new_deferred_id : unit -> deferred_id
+
   (** We typically label nodes of the trace with messages to
       print. But we don't want to compute the result. *)
   type lazy_msg = unit -> Pp.t
 
   (** The type of the tags for [Info]. *)
   type tag =
+    | TagDeferredContents of deferred_id
+    | TagDeferredPlaceholder of deferred_id
     | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
     | TagDispatchBranch (** A marker to delimit an individual branch of [TagDispatch]. *)
     | TagTactic of lazy_msg (** A tactic call. *)

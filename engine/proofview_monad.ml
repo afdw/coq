@@ -64,12 +64,22 @@ end
 module Info = struct
   open TraceBuilder
 
+  type deferred_id = int
+
+  let deferred_id_ctr = ref 0
+
+  let new_deferred_id () = incr deferred_id_ctr; !deferred_id_ctr
+
+  module DeferredIdMap = Map.Make(Int)
+
   (** We typically label nodes of the trace with messages to
       print. But we don't want to compute the result. *)
   type lazy_msg = unit -> Pp.t
 
   (** The type of the tags for [Info]. *)
   type tag =
+    | TagDeferredContents of deferred_id
+    | TagDeferredPlaceholder of deferred_id
     | TagDispatch (** A call to [tclDISPATCHGEN], [tclEXTEND], [Proofview.Goal.enter], or [Ftactic.enter]. *)
     | TagDispatchBranch (** A marker to delimit an individual branch of [TagDispatch]. *)
     | TagTactic of lazy_msg (** A tactic call. *)
@@ -84,19 +94,90 @@ module Info = struct
     | Tactic of lazy_msg * trace (** A tactic call, with its execution detailed. *)
     | Message of lazy_msg (** A message by [TacId]. *)
 
-  let rec finish_tree = function
-    | Node (TagDispatch, brs) ->
+  let rec collect_deferred_tree deferred_map = function
+    | Node (TagDeferredContents deferred_id, f) ->
+      (* assert (not (deferred_map |> DeferredIdMap.mem deferred_id));
+      let deferred_map, f = collect_deferred_forest deferred_map f in
+      deferred_map |> DeferredIdMap.add deferred_id f, None *)
+      let deferred_map, f = collect_deferred_forest deferred_map f in
+      if not (deferred_map |> DeferredIdMap.mem deferred_id) then
+        deferred_map |> DeferredIdMap.add deferred_id f, None
+      else
+        deferred_map |> DeferredIdMap.add deferred_id [
+          Node (
+            TagDispatch,
+            [
+              Node (
+                TagDispatchBranch,
+                [
+                  Node (
+                    TagTactic (fun () -> Pp.(str "Duplicate contents for deferred_id " ++ int deferred_id)),
+                    []
+                  )
+                ]
+              );
+              Node (
+                TagDispatchBranch,
+                deferred_map |> DeferredIdMap.find deferred_id
+              );
+              Node (
+                TagDispatchBranch,
+                f
+              )
+            ]
+          )
+        ], None
+    | Node (tag, f) ->
+      let deferred_map, f = collect_deferred_forest deferred_map f in
+      deferred_map, Some (Node (tag, f))
+  and collect_deferred_forest deferred_map f =
+    List.fold_right (fun t (deferred_map, f) ->
+      let deferred_map, t = collect_deferred_tree deferred_map t in
+      deferred_map, (t |> Option.to_list) @ f
+    ) f (deferred_map, [])
+
+  let rec substitute_deferred_tree deferred_map = function
+    | Node (TagDeferredContents _, _) -> assert false
+    | Node (TagDeferredPlaceholder deferred_id, []) ->
+      (* deferred_map
+        |> DeferredIdMap.find deferred_id
+        |> substitute_deferred_forest deferred_map *)
+      (* deferred_map
+        |> DeferredIdMap.find_opt deferred_id
+        |> Option.map (substitute_deferred_forest deferred_map)
+        |> Option.default [] *)
+      deferred_map
+        |> DeferredIdMap.find_opt deferred_id
+        |> Option.map (substitute_deferred_forest deferred_map)
+        |> Option.default [Node (TagTactic (fun () -> Pp.(str "No contents for deferred_id " ++ int deferred_id)), [])]
+    | Node (TagDeferredPlaceholder _, _) ->
+      assert false
+    | Node (tag, f) ->
+      [Node (tag, f |> substitute_deferred_forest deferred_map)]
+  and substitute_deferred_forest deferred_map f =
+    f |> List.map (substitute_deferred_tree deferred_map) |> List.flatten
+
+  let rec convert_tree = function
+    | Node (TagDeferredContents _, _) -> assert false
+    | Node (TagDeferredPlaceholder _, _) -> assert false
+    | Node (TagDispatch, f) ->
       Dispatch (
-        brs |> List.map (function
-          | Node (TagDispatchBranch, f) -> finish f
+        f |> List.map (function
+          | Node (TagDispatchBranch, f) -> convert_forest f
           | _ -> assert false
         )
       )
     | Node (TagDispatchBranch, _) -> assert false
-    | Node (TagTactic m, f) -> Tactic (m, finish f)
+    | Node (TagTactic m, f) -> Tactic (m, convert_forest f)
     | Node (TagMessage m, []) -> Message m
     | Node (TagMessage _, _) -> assert false
-  and finish f = Sequence (f |> List.map finish_tree)
+  and convert_forest f = Sequence (f |> List.map convert_tree)
+
+  let finish f =
+    let deferred_map = DeferredIdMap.empty in
+    let deferred_map, f = collect_deferred_forest deferred_map f in
+    let f = substitute_deferred_forest deferred_map f in
+    convert_forest f
 
   let rec compress = function
     | Sequence brs ->

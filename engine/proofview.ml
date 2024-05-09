@@ -442,6 +442,22 @@ module Trace = struct
 
   type tactic_wrapper = {wrap : 'a. 'a tactic -> 'a tactic}
 
+  let id_tactic_wrapper = {wrap = Fun.id}
+  let compose_tactic_wrappers w1 w2 = {wrap = fun t -> w1.wrap (w2.wrap t)}
+
+  let tag_deferred_contents deferred_id t = InfoL.tag (Info.TagDeferredContents deferred_id) t
+  let tag_new_deferred_contents f =
+    let open Proof in
+    tclUNIT () >>= fun () ->
+    let deferred_id = Proofview_monad.Info.new_deferred_id () in
+    InfoL.tag (Info.TagDeferredContents deferred_id) (f deferred_id)
+  let deferred_placeholder deferred_id = InfoL.leaf (Info.TagDeferredPlaceholder deferred_id)
+  let new_deferred_placeholder =
+    let open Proof in
+    tclUNIT () >>= fun () ->
+    let deferred_id = Proofview_monad.Info.new_deferred_id () in
+    InfoL.leaf (Info.TagDeferredPlaceholder deferred_id) >>
+    tclUNIT deferred_id
   let tag_dispatch f =
     InfoL.tag Info.TagDispatch (
       f ~tag_branch:{wrap = fun t -> InfoL.tag Info.TagDispatchBranch t}
