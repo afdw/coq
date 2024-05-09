@@ -513,26 +513,26 @@ let late_arg_ctr = ref 0
 
 let new_late_arg () = incr late_arg_ctr; !late_arg_ctr
 
-type late_args_map =
-  (late_arg * raw_generic_argument) list *
-  (late_arg * glob_generic_argument) list
+module LateArgMap = Map.Make(Int)
+
+type late_args_map = raw_generic_argument LateArgMap.t * glob_generic_argument LateArgMap.t
 
 let f_late_args_map : late_args_map Evd.Store.field = Evd.Store.field "late_args_map"
 
 let retrieve_raw_late_arg late_arg =
   Proofview.tclEVARMAP >>= fun sigma ->
   let store = Evd.get_extra_data sigma in
-  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
-  Proofview.tclUNIT (fst late_args_map |> List.assoc_opt late_arg)
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
+  Proofview.tclUNIT (fst late_args_map |> LateArgMap.find_opt late_arg)
 
 let populate_raw_late_arg late_arg v =
   Proofview.tclEVARMAP >>= fun sigma ->
   let store = Evd.get_extra_data sigma in
-  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
   let late_args_map = (
     (match v with
-    | None -> fst late_args_map |> List.remove_assoc late_arg
-    | Some v -> (late_arg, v) :: fst late_args_map),
+    | None -> fst late_args_map |> LateArgMap.remove late_arg
+    | Some v -> fst late_args_map |> LateArgMap.add late_arg v),
     snd late_args_map
   ) in
   let store = Evd.Store.set store f_late_args_map late_args_map in
@@ -549,18 +549,18 @@ let wrap_populate_raw_late_arg late_arg v tac =
 let retrieve_glob_late_arg late_arg =
   Proofview.tclEVARMAP >>= fun sigma ->
   let store = Evd.get_extra_data sigma in
-  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
-  Proofview.tclUNIT (snd late_args_map |> List.assoc_opt late_arg)
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
+  Proofview.tclUNIT (snd late_args_map |> LateArgMap.find_opt late_arg)
 
 let populate_glob_late_arg late_arg v =
   Proofview.tclEVARMAP >>= fun sigma ->
   let store = Evd.get_extra_data sigma in
-  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
   let late_args_map = (
     fst late_args_map,
     (match v with
-    | None -> snd late_args_map |> List.remove_assoc late_arg
-    | Some v -> (late_arg, v) :: snd late_args_map)
+    | None -> snd late_args_map |> LateArgMap.remove late_arg
+    | Some v -> snd late_args_map |> LateArgMap.add late_arg v)
   ) in
   let store = Evd.Store.set store f_late_args_map late_args_map in
   let sigma = Evd.set_extra_data store sigma in
@@ -577,7 +577,7 @@ let wrap_populate_glob_late_arg late_arg v tac =
 let wrap_keep_late_args t =
   Proofview.tclEVARMAP >>= fun sigma ->
   let store = Evd.get_extra_data sigma in
-  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
   t >>= fun r ->
   let store = Evd.Store.set store f_late_args_map late_args_map in
   let sigma = Evd.set_extra_data store sigma in
@@ -591,14 +591,14 @@ let wit_late_arg : (late_arg, late_arg, Empty.t) genarg_type =
     wit
     (fun env sigma _ _ _ n late_arg ->
       let store = Evd.get_extra_data sigma in
-      let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
-      Pputils.pr_raw_generic env sigma (Some n) (fst late_args_map |> List.assoc late_arg)
+      let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
+      Pputils.pr_raw_generic env sigma (Some n) (fst late_args_map |> LateArgMap.find late_arg)
     )
     (fun env sigma _ _ _ n late_arg ->
       let store = Evd.get_extra_data sigma in
-      let late_args_map = Evd.Store.get store f_late_args_map |> Option.default ([], []) in
+      let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
       (* Printf.eprintf "?? %d %d\n" late_arg (snd late_args_map |> List.length); *)
-      Pputils.pr_glb_generic env sigma (Some n) (snd late_args_map |> List.assoc late_arg)
+      Pputils.pr_glb_generic env sigma (Some n) (snd late_args_map |> LateArgMap.find late_arg)
     )
     (fun env sigma _ _ _ n -> Empty.abort)
     Ppconstr.ltop Ppconstr.lsimpleconstr;

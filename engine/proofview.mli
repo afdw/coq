@@ -280,7 +280,7 @@ val tclTRYFOCUS : int -> int -> unit tactic -> unit tactic
 module Trace : sig
   (** [record_info_trace t] behaves like [t] except the [info] trace
       is stored. *)
-  val record_info_trace : 'a tactic -> 'a tactic
+  val record_info_trace : ?v:bool -> 'a tactic -> 'a tactic
 
   type tactic_wrapper = {wrap : 'a. 'a tactic -> 'a tactic}
 

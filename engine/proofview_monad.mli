@@ -181,7 +181,7 @@ module Status : Writer with type t := bool
 (** Lens and utilities pertaining to the info trace *)
 module InfoL : sig
   (** [record_trace t] behaves like [t] and compute its [info] trace. *)
-  val record_trace : 'a Logical.t -> 'a Logical.t
+  val record_trace : ?v:bool -> 'a Logical.t -> 'a Logical.t
 
   val update : (Info.state -> Info.state) -> unit Logical.t
 

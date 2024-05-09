@@ -42,6 +42,8 @@ open Proofview.Notations
 open Context.Named.Declaration
 open Ltac_pretype
 
+let debug_tacinterp = CDebug.create ~name:"tacinterp" ()
+
 let do_profile trace ?count_call tac =
   Profile_tactic.do_profile_gen (function
       | (_, c) :: _ -> Some (Pptactic.pp_ltac_call_kind c)
@@ -1116,7 +1118,7 @@ let tag_print ist k t =
 
 (* Interprets an l-tac expression into a value *)
 let rec val_interp_ftactic ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : TaggedVal.t Ftactic.t =
-  Feedback.msg_info Pp.(str "val_interp_ftactic " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac with e when CErrors.noncritical e -> Pp.str "!?!");
+  debug_tacinterp (fun () -> Pp.(str "val_interp_ftactic " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac with e when CErrors.noncritical e -> Pp.str "!?!"));
   let (>>=) = Ftactic.bind in
   (* The name [appl] of applied top-level Ltac names is ignored in
      [aux]. It is installed in the second step by a call to
@@ -1140,9 +1142,9 @@ let rec val_interp_ftactic ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : 
     | TacLetIn (false, l, u) -> interp_letin ist l u
     | TacMatchGoal (lz, lr, lmr) -> interp_match_goal ist lz lr lmr
     | TacMatch (lz, c, lmr) -> interp_match ist lz c lmr
-    | TacArg v -> Feedback.msg_info Pp.(str "TacArg"); interp_tacarg_ftactic ist v
+    | TacArg v -> debug_tacinterp (fun () -> Pp.(str "TacArg")); interp_tacarg_ftactic ist v
     | _ ->
-      Feedback.msg_info Pp.(str "val_interp_ftactic: Delayed evaluation");
+      debug_tacinterp (fun () -> Pp.(str "val_interp_ftactic: Delayed evaluation"));
       (* Delayed evaluation *)
       Proofview.Trace.tag_deferred_contents ist.deferred_id (
         populate_current_late_arg ist tac <*>
@@ -1176,8 +1178,10 @@ and interp_tactic ist tac : unit Proofview.tactic =
   Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
   val_interp {ist with deferred_id} tac (fun v -> tactic_of_tagged_value ist v)
 
+and stop_list = ["tauto"; "btauto"; "ring"; "ring_simplify"; "field"; "field_simplify"; "lia"; "nia"; "lra"; "nra"; "psatz"; "nsatz"]
+
 and eval_tactic_ist ist tac : unit Proofview.tactic =
-  Feedback.msg_info Pp.(str "eval_tactic_ist " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac with e when CErrors.noncritical e -> Pp.str "!?!");
+  debug_tacinterp (fun () -> Pp.(str "eval_tactic_ist " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) tac with e when CErrors.noncritical e -> Pp.str "!?!"));
   assert (ist.deferred_id = Proofview_monad.Info.fake_deferred_id);
   let ist = set_current_late_arg ist top_late_arg in
   let loc = tac.loc in
@@ -1294,7 +1298,7 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
 
   (* For extensions *)
   | TacAlias (s, args) ->
-    Feedback.msg_info Pp.(str "TacAlias");
+    debug_tacinterp (fun () -> Pp.(str "TacAlias"));
     tag_print ist (Proofview_monad.Info.Alias (Pptactic.pr_alias_key s)) @@
       let s_interp = Tacenv.interp_alias s in
       let len1 = List.length s_interp.alias_args in
@@ -1320,6 +1324,10 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           let ist = {deferred_id; lfun; poly; extra = add_extra_loc loc (add_extra_trace trace ist.extra)} in
           val_interp_ftactic ist s_interp.alias_body >>= fun v ->
           let tac_interp = tactic_of_tagged_value {ist with deferred_id = Proofview_monad.Info.fake_deferred_id} v in
+          let tac_interp =
+            if stop_list |> List.exists (fun t -> String.string_contains ~where:(Pptactic.pr_alias_key s |> Pp.simple_string_of_ppcmds) ~what:t)
+            then Proofview.Trace.record_info_trace ~v:false tac_interp
+            else tac_interp in
           Ftactic.return tac_interp in
         Ftactic.run tac_f (fun tac_interp -> tac_interp)
       else
@@ -1328,7 +1336,7 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           (str "Arguments length mismatch: expected " ++ int len1 ++ str ", found " ++ int len2)
 
   | TacML (opn, args) ->
-    Feedback.msg_info Pp.(str "TacML");
+    debug_tacinterp (fun () -> Pp.(str "TacML"));
     tag_print ist (Proofview_monad.Info.ML (Pptactic.pr_extend_name opn)) @@
       let opn_interp = Tacenv.interp_ml_tactic opn in
       let tac_f =
@@ -1349,6 +1357,10 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
         let args_interp = List.rev args_interp in
         let (stack, _) = trace in
         let tac_interp = Proofview.Trace.tag_deferred_contents deferred_id (catch_error_tac_loc loc stack (opn_interp args_interp ist)) in
+        let tac_interp =
+          if stop_list |> List.exists (fun t -> String.string_contains ~where:(Pptactic.pr_extend_name opn |> Pp.simple_string_of_ppcmds) ~what:t)
+          then Proofview.Trace.record_info_trace ~v:false tac_interp
+          else tac_interp in
         Ftactic.return tac_interp in
       Ftactic.run tac_f (fun tac_interp -> tac_interp) in
   wrap_populate_late_arg top_late_arg tac tac_interp
@@ -1363,7 +1375,7 @@ and force_vrec_ftactic ist v : TaggedVal.t Ftactic.t =
     Ftactic.return (TaggedVal.make ist.deferred_id v)
 
 and interp_ltac_reference_ftactic ?loc' mustbetac ist r : TaggedVal.t Ftactic.t =
-  Feedback.msg_info Pp.(str "interp_ltac_reference_ftactic " ++ try Pptactic.pr_glob_tactic_arg (Global.env ()) (Evd.from_env (Global.env ())) (Reference r) with e when CErrors.noncritical e -> Pp.str "!?!");
+  debug_tacinterp (fun () -> Pp.(str "interp_ltac_reference_ftactic " ++ try Pptactic.pr_glob_tactic_arg (Global.env ()) (Evd.from_env (Global.env ())) (Reference r) with e when CErrors.noncritical e -> Pp.str "!?!"));
   match r with
   | ArgVar {loc; v = id} ->
       let (>>=) = Ftactic.bind in
@@ -1395,7 +1407,7 @@ and interp_ltac_reference_ftactic ?loc' mustbetac ist r : TaggedVal.t Ftactic.t 
           (val_interp_ftactic ~appl ist (Tacenv.interp_ltac r)))
 
 and interp_tacarg_ftactic ist arg : TaggedVal.t Ftactic.t =
-  Feedback.msg_info Pp.(str "interp_tacarg_ftactic " ++ try Pptactic.pr_glob_tactic_arg (Global.env ()) (Evd.from_env (Global.env ())) arg with e when CErrors.noncritical e -> Pp.str "!?!");
+  debug_tacinterp (fun () -> Pp.(str "interp_tacarg_ftactic " ++ try Pptactic.pr_glob_tactic_arg (Global.env ()) (Evd.from_env (Global.env ())) arg with e when CErrors.noncritical e -> Pp.str "!?!"));
   let (>>=) = Ftactic.bind in
   match arg with
   | TacGeneric (_, arg) -> interp_genarg ist arg
@@ -1574,14 +1586,14 @@ and interp_app loc ist fv largs : TaggedVal.t Ftactic.t =
 
 (* Gives the tactic corresponding to the tactic value *)
 and tactic_of_value ist vle =
-  Feedback.msg_info (str "tactic_of_value " ++ try (
+  debug_tacinterp (fun () -> (str "tactic_of_value " ++ try (
     let Val.Dyn (tag, _) = vle in
     let pr_v =
       let env = Global.env () in
       let sigma = Evd.from_env env in
       Pptactic.pr_value ~context:(env, sigma) Pptactic.ltop vle in
     str "<" ++ Val.pr tag ++ str ":(" ++ pr_v ++ str ")>"
-  ) with e when CErrors.noncritical e -> Pp.str "!?!");
+  ) with e when CErrors.noncritical e -> Pp.str "!?!"));
   assert (ist.deferred_id = Proofview_monad.Info.fake_deferred_id);
   if has_type vle (topwit wit_tacvalue) then
   match to_tacvalue vle with
@@ -2279,7 +2291,7 @@ let hide_interp {global;ast} =
   let hide_interp env =
     let ist = Genintern.empty_glob_sign ~strict:false env in
     let te = intern_pure_tactic ist ast in
-    Feedback.msg_info Pp.(str "hide_interp " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) te with e when CErrors.noncritical e -> Pp.str "!?!");
+    debug_tacinterp (fun () -> Pp.(str "hide_interp " ++ try Pptactic.pr_glob_tactic (Global.env ()) (Evd.from_env (Global.env ())) te with e when CErrors.noncritical e -> Pp.str "!?!"));
     let t = eval_tactic te in
     if !Flags.tracing then
       (Proofview.tclUNIT () >>= (fun () ->
