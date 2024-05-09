@@ -239,10 +239,10 @@ end
 module InfoL = struct
   let recording = Logical.(map (fun {P.trace} -> trace) current)
 
-  let record_trace t =
+  let with_recording v t =
     Logical.(
       current >>= fun s ->
-      local {s with P.trace = true} t
+      local {s with P.trace = v} t
     )
 
   let raw_update = Logical.update

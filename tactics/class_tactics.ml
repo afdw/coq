@@ -1006,7 +1006,7 @@ module Search = struct
        Id.of_string "instance", false
     in
     let tac =
-      if get_debug () > 1 then Proofview.Trace.record_info_trace tac
+      if get_debug () > 1 then Proofview.Trace.with_recording true tac
       else tac
     in
     let (), pv', unsafe, info =
