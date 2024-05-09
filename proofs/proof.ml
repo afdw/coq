@@ -472,7 +472,7 @@ let solve ?with_end_tac gi info_lvl tac pr =
       | Some etac -> Proofview.tclTHEN tac etac in
     let tac = match info_lvl with
       | None -> tac
-      | Some _ -> Proofview.Trace.record_info_trace tac
+      | Some _ -> Proofview.Trace.with_recording true tac
     in
     let nosuchgoal =
       let info = Exninfo.reify () in
