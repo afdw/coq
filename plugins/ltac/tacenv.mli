@@ -95,3 +95,5 @@ val register_ml_tactic : ?overwrite:bool -> ml_tactic_name -> ml_tactic array ->
 
 val interp_ml_tactic : ml_tactic_entry -> ml_tactic
 (** Get the named tactic. Raises a user error if it does not exist. *)
+
+module MLTacMap : CSig.MapS with type key = ml_tactic_name

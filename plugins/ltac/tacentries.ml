@@ -627,10 +627,6 @@ let () =
   ] in
   register_grammars_by_name "tactic" entries
 
-let get_identifier i =
-  (* Workaround for badly-designed generic arguments lacking a closure *)
-  Names.Id.of_string_soft (Printf.sprintf "$%i" i)
-
 type _ ty_sig =
 | TyNil : (Geninterp.interp_sign -> unit Proofview.tactic) ty_sig
 | TyIdent : string * 'r ty_sig -> 'r ty_sig
@@ -653,7 +649,7 @@ let rec clause_of_sign : type a. int -> a ty_sig -> Genarg.ArgT.any Extend.user_
   | TyNil -> []
   | TyIdent (s, sig') -> TacTerm s :: clause_of_sign i sig'
   | TyArg (a, sig') ->
-    let id = Some (get_identifier i) in
+    let id = Some (Pptactic.get_identifier i) in
     TacNonTerm (None, (untype_user_symbol a, id)) :: clause_of_sign (i + 1) sig'
 
 let clause_of_ty_ml = function
@@ -693,25 +689,46 @@ let rec only_constr : type a. a ty_sig -> bool = function
 let rec mk_sign_vars : type a. int -> a ty_sig -> Name.t list = fun i tu -> match tu with
 | TyNil -> []
 | TyIdent (_,s) -> mk_sign_vars i s
-| TyArg (_, s) -> Name (get_identifier i) :: mk_sign_vars (i + 1) s
+| TyArg (_, s) -> Name (Pptactic.get_identifier i) :: mk_sign_vars (i + 1) s
 
 let dummy_id = Id.of_string "_"
 
-let lift_constr_tac_to_ml_tac vars tac =
-  let tac _ ist = Proofview.Goal.enter begin fun gl ->
-    let env = Proofview.Goal.env gl in
-    let sigma = Tacmach.project gl in
-    let map = function
-    | Anonymous -> None
-    | Name id ->
-      let c = Id.Map.find id ist.Geninterp.lfun in
-      try Some (Taccoerce.Value.of_constr @@ Taccoerce.coerce_to_closed_constr env c)
-      with Taccoerce.CannotCoerceTo ty ->
-        Taccoerce.error_ltac_variable dummy_id (Some (env,sigma)) c ty
-    in
-    let args = List.map_filter map vars in
-    tac args ist
-  end in
+let lift_constr_tac_to_ml_tac ml vars tac =
+  let open Proofview.Notations in
+  let tac _ ist =
+    Tacinterp.tag_print ist (Proofview_monad.Info.Builtin (Pp.str "lift_constr_tac_to_ml_tac")) (
+      Proofview.Goal.enter begin fun gl ->
+        let env = Proofview.Goal.env gl in
+        let sigma = Tacmach.project gl in
+        let args =
+          vars |> List.map_filter (function
+            | Anonymous -> None
+            | Name id -> Some id
+          ) in
+        let arg_late_args = args |> List.map (fun _ -> Taccoerce.new_late_arg ()) in
+        (List.combine args arg_late_args |> Proofview.Monad.List.iter (fun (arg, arg_late_arg) ->
+          Tacinterp.populate_late_arg arg_late_arg (CAst.make (Tacexpr.TacArg (Tacexpr.Reference (Locus.ArgVar (CAst.make arg)))))
+        )) <*>
+        Tacinterp.populate_current_late_arg ist
+          (CAst.make (Tacexpr.TacML (ml, arg_late_args |> List.map Taccoerce.glob_late_arg_tac_arg))) <*>
+        let rec aux args_arg_late_args values =
+          match args_arg_late_args with
+          | [] -> tac (List.rev values) ist
+          | (arg, arg_late_arg) :: args_arg_late_args' ->
+            let c = Id.Map.find arg ist.Geninterp.lfun in
+            let c_constr =
+              try Taccoerce.coerce_to_closed_constr env c
+              with Taccoerce.CannotCoerceTo ty ->
+                Taccoerce.error_ltac_variable dummy_id (Some (env,sigma)) c ty in
+            let c_constr_glob = Detyping.detype Detyping.Now Id.Set.empty env sigma c_constr, None in
+            Tacinterp.populate_late_arg arg_late_arg (CAst.make (Tacexpr.TacArg (TacGeneric (None, Genarg.in_gen (Glbwit Stdarg.wit_constr) c_constr_glob)))) <*>
+            let value = Taccoerce.Value.of_constr c_constr in
+            Tacinterp.tag_print ist (Proofview_monad.Info.Builtin (Pp.str "Reference")) (
+              aux args_arg_late_args' (value :: values)
+            ) in
+        aux (List.combine args arg_late_args) []
+      end
+    ) in
   tac
 
 let tactic_extend plugin_name tacname ~level ?deprecation sign =
@@ -720,6 +737,8 @@ let tactic_extend plugin_name tacname ~level ?deprecation sign =
     { mltac_tactic = tacname;
       mltac_plugin = plugin_name }
   in
+  Pptactic.ml_tactic_notation_table :=
+    !Pptactic.ml_tactic_notation_table |> Tacenv.MLTacMap.add ml_tactic_name (sign |> List.map clause_of_ty_ml);
   match sign with
   | [TyML (TyIdent (name, s),tac) as ml_tac] when only_constr s ->
     (* The extension is only made of a name followed by constr
@@ -732,7 +751,7 @@ let tactic_extend plugin_name tacname ~level ?deprecation sign =
     (* Special handling of tactics without arguments: such tactics do
        not do a Proofview.Goal.nf_enter to compute their arguments. It
        matters for some whole-prof tactics like [shelve_unifiable]. *)
-    | _ -> lift_constr_tac_to_ml_tac vars (eval ml_tac)
+    | _ -> lift_constr_tac_to_ml_tac ml vars (eval ml_tac)
     in
     (* Arguments are not passed directly to the ML tactic in the TacML
        node, the ML tactic retrieves its arguments in the [ist]

@@ -65,6 +65,15 @@ type pp_tactic = {
 (* Tactic notations *)
 let prnotation_tab = Summary.ref ~name:"pptactic-notation" KNmap.empty
 
+let ml_tactic_notation_table =
+  ref (Tacenv.MLTacMap.empty : grammar_terminals list Tacenv.MLTacMap.t)
+  (* Summary.ref (Tacenv.MLTacMap.empty : grammar_terminals list Tacenv.MLTacMap.t)
+    ~name:"tactic-notation" *)
+
+let get_identifier i =
+  (* Workaround for badly-designed generic arguments lacking a closure *)
+  Names.Id.of_string_soft (Printf.sprintf "$%i" i)
+
 let declare_notation_tactic_pprule kn pt =
   prnotation_tab := KNmap.add kn pt !prnotation_tab
 
@@ -279,10 +288,9 @@ let string_of_genarg_arg (ArgumentType arg) =
          has no meaning user-side *)
       KerName.print key
 
-  let pr_alias_gen pr_gen lev key l =
+  let pr_notation_gen pr_gen lev prods l =
     let exception AliasNotFound in
     try
-      let pp = try KNmap.find key !prnotation_tab with Not_found -> raise AliasNotFound in
       let rec pack prods args = match prods, args with
       | [], [] -> []
       | TacTerm s :: prods, args -> TacTerm s :: pack prods args
@@ -291,8 +299,17 @@ let string_of_genarg_arg (ArgumentType arg) =
         TacNonTerm (loc, ((symb, arg), ido)) :: pack prods args
       | _ -> raise AliasNotFound
       in
-      let prods = pack pp.pptac_prods l in
-      let p = hov 2 (pr_tacarg_using_rule pr_gen prods) in
+      let prods = pack prods l in
+      hov 2 (pr_tacarg_using_rule pr_gen prods)
+    with AliasNotFound ->
+      let pr _ = str "_" in
+      hov 2 (str "(* Unknown key *)" ++ spc () ++ pr_sequence pr l ++ str " (* Generic printer *)")
+
+  let pr_alias_gen pr_gen lev key l =
+    let exception AliasNotFound in
+    try
+      let pp = try KNmap.find key !prnotation_tab with Not_found -> raise AliasNotFound in
+      let p = pr_notation_gen pr_gen lev pp.pptac_prods l in
       if pp.pptac_level > lev then surround p else p
     with AliasNotFound ->
       let pr _ = str "_" in
@@ -357,6 +374,11 @@ let string_of_genarg_arg (ArgumentType arg) =
     pr_extend_gen (pr_tactic_arg prtac)
   let pr_glob_extend_rec prtac =
     pr_extend_gen (pr_tactic_arg prtac)
+
+  let pr_raw_notation prtac lev prods args =
+    pr_notation_gen (pr_targ (fun l a -> prtac l (CAst.make @@ TacArg a))) lev prods args
+  let pr_glob_notation prtac lev prods args =
+    pr_notation_gen (pr_targ (fun l a -> prtac l (CAst.make @@ TacArg a))) lev prods args
 
   let pr_raw_alias prtac lev key args =
     pr_alias_gen (pr_targ (fun l a -> prtac l (CAst.make @@ TacArg a))) lev key args
@@ -668,7 +690,9 @@ let pr_goal_selector ~toplevel s =
     pr_occvar    : 'occvar -> Pp.t;
     pr_generic   : Environ.env -> Evd.evar_map -> entry_relative_level option -> 'lev generic_argument -> Pp.t;
     pr_extend    : int -> ml_tactic_entry -> 'a gen_tactic_arg list -> Pp.t;
+    pr_notation  : int -> grammar_terminals -> 'a gen_tactic_arg list -> Pp.t;
     pr_alias     : int -> KerName.t -> 'a gen_tactic_arg list -> Pp.t;
+    pr_make_var  : Names.Id.t -> 'ref;
   }
 
   constraint 'a = <
@@ -1057,8 +1081,25 @@ let pr_goal_selector ~toplevel s =
               lcall
             | TacArg a ->
               pr_tacarg a, latom
-            | TacML (s,l) ->
-              pr_with_comments ?loc (pr.pr_extend 1 s l), lcall
+            | TacML (s,l) -> (
+              let { mltac_name = t; mltac_index = i } = s in
+              let tactic_notation =
+                match !ml_tactic_notation_table |> Tacenv.MLTacMap.find_opt t with
+                | Some l -> List.nth_opt l i
+                | None -> None in
+              match tactic_notation with
+              | None ->
+                pr_with_comments ?loc (pr.pr_extend 1 s l), lcall
+              | Some prods ->
+                let n = prods |> List.count (fun prod -> match prod with TacNonTerm _ -> true | _ -> false) in
+                let l =
+                  List.init n (fun i ->
+                    if i < List.length l
+                    then List.nth l i
+                    else Reference (pr.pr_make_var (get_identifier (i + 1)))
+                  ) in
+                pr_with_comments ?loc (pr.pr_notation (level_of inherited) prods l), latom
+            )
             | TacAlias (kn,l) ->
               pr_with_comments ?loc (pr.pr_alias (level_of inherited) kn l), latom
           )
@@ -1109,7 +1150,9 @@ let pr_goal_selector ~toplevel s =
       pr_occvar = pr_or_var int;
       pr_generic = Pputils.pr_raw_generic;
       pr_extend = pr_raw_extend_rec @@ pr_raw_tactic_level env sigma;
+      pr_notation = pr_raw_notation @@ pr_raw_tactic_level env sigma;
       pr_alias = pr_raw_alias @@ pr_raw_tactic_level env sigma;
+      pr_make_var = (fun s -> Libnames.qualid_of_ident s);
     } in
     make_pr_tac env sigma
       pr raw_printers
@@ -1141,7 +1184,9 @@ let pr_goal_selector ~toplevel s =
         pr_occvar = pr_or_var int;
         pr_generic = Pputils.pr_glb_generic;
         pr_extend = pr_glob_extend_rec prtac;
+        pr_notation = pr_glob_notation prtac;
         pr_alias = pr_glob_alias prtac;
+        pr_make_var = (fun s -> Locus.ArgVar (CAst.make s));
       } in
       make_pr_tac env sigma
         pr glob_printers
@@ -1179,7 +1224,9 @@ let pr_goal_selector ~toplevel s =
         (* Those are not used by the atomic printer *)
         pr_generic = (fun _ -> assert false);
         pr_extend = (fun _ _ _ -> assert false);
+        pr_notation = (fun _ _ _ -> assert false);
         pr_alias = (fun _ _ _ -> assert false);
+        pr_make_var = (fun _ -> assert false);
       }
       in
       pr_atom env sigma pr strip_prod_binders_constr tag_atomic_tactic_expr t
