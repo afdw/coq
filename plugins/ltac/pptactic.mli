@@ -90,6 +90,10 @@ type pp_tactic = {
   pptac_prods : grammar_terminals;
 }
 
+val ml_tactic_notation_table : grammar_terminals list Tacenv.MLTacMap.t ref
+
+val get_identifier : int -> Names.Id.t
+
 val pr_goal_selector : toplevel:bool -> Goal_select.t -> Pp.t
 
 val declare_notation_tactic_pprule : KerName.t -> pp_tactic -> unit
