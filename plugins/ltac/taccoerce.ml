@@ -52,6 +52,60 @@ let (wit_value : (Val.t, Val.t, Val.t) genarg_type) =
     Genprint.generic_val_print;
   wit
 
+let (wit_value_of_corrent_type : (Val.t, Val.t, Val.t) genarg_type) =
+  let wit = Genarg.create_arg "value_of_correct_type" in
+  register_val0 wit None;
+  Genprint.register_print0
+    wit
+    (Genprint.generic_val_print %> Genprint.printer_result_of_top_printer_result)
+    (Genprint.generic_val_print %> Genprint.printer_result_of_top_printer_result)
+    Genprint.generic_val_print;
+  wit
+
+let rec project_tag : type a. a Val.tag -> Val.t -> a option = fun t (Dyn (typ, x) as v) ->
+  match t with
+  | Val.Base t -> (
+    let Val.Dyn (t', x) = v in
+    match Val.eq t t' with
+    | Some Refl -> Some x
+    | None -> None
+  )
+  | Val.List t -> (
+    match Val.eq typ Val.typ_list with
+    | Some Refl ->
+      let l = x |> List.map (project_tag t) in
+      if l |> List.for_all Option.has_some
+      then Some (l |> List.map Option.get)
+      else None
+    | None -> None
+  )
+  | Val.Opt t -> (
+    match Val.eq typ Val.typ_opt with
+    | Some Refl -> (
+      match x with
+      | Some y -> (
+        match project_tag t y with
+        | Some z -> Some (Some z)
+        | None -> None
+      )
+      | None -> Some None
+    )
+    | None -> None
+  )
+  | Val.Pair (t1, t2) -> (
+    match Val.eq typ Val.typ_pair with
+    | Some Refl -> (
+      let (y, z) = x in
+      match project_tag t1 y, project_tag t2 z with
+      | Some y', Some z' -> Some (y', z')
+      | _, _ -> None
+    )
+    | None -> None
+  )
+
+let project : type a. a typed_abstract_argument_type -> Val.t -> a option = fun wit v ->
+  project_tag (val_tag wit) v
+
 (** All the types considered here are base types *)
 let val_tag wit = match val_tag wit with
 | Val.Base t -> t
@@ -608,6 +662,92 @@ let glob_late_arg_tac_arg ?isquot late_arg =
 
 let glob_late_arg_tac ?isquot late_arg =
   CAst.make (Tacexpr.TacArg (glob_late_arg_tac_arg ?isquot late_arg))
+
+let debug_deref = CDebug.create ~name:"deref" ()
+
+let _ =
+  let f : type l. Environ.env -> Evd.evar_map -> argument_type option -> l generic_argument -> l generic_argument option = fun env sigma argument_type ->
+    let store = Evd.get_extra_data sigma in
+    let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
+    function (GenArg (wit, arg) as x) -> match wit with
+    | Rawwit (ExtraArg tag) when Genarg.has_type x (Rawwit wit_late_arg) -> (
+      let late_arg = Genarg.out_gen (Rawwit wit_late_arg) x in
+      match fst late_args_map |> LateArgMap.find_opt late_arg with
+      | Some v -> Some v
+      | None -> None
+    )
+    | Rawwit (ExtraArg tag) when Genarg.has_type x (Rawwit wit_tactic) -> (
+      let tac = Genarg.out_gen (Rawwit wit_tactic) x in
+      match tac.v with
+      | TacArg (TacGeneric (_, v)) -> Some v
+      | _ -> None
+    )
+    | Rawwit (ExtraArg tag) when Genarg.has_type x (Rawwit wit_value) -> (
+      let (Dyn (typ, y) as val_) = Genarg.out_gen (Rawwit wit_value) x in
+      match argument_type with
+      | Some (ArgumentType argument_type) -> (
+        match prj (val_tag (Topwit argument_type)) val_ with
+        | Some z ->
+          debug_deref (fun () -> Pp.str "prj!");
+          Some (Genarg.in_gen (Rawwit wit_value_of_corrent_type) val_)
+        | None -> None
+      )
+      | None ->
+        match Val.eq typ Val.typ_list with
+        | Some Refl -> Some (Genarg.in_gen (Rawwit (ListArg wit_value)) y)
+        | None ->
+          match Val.eq typ Val.typ_opt with
+          | Some Refl -> Some (Genarg.in_gen (Rawwit (OptArg wit_value)) y)
+          | None ->
+            match Val.eq typ Val.typ_pair with
+            | Some Refl -> Some (Genarg.in_gen (Rawwit (PairArg (wit_value, wit_value))) y)
+            | None -> None
+    )
+    | Glbwit (ExtraArg tag) when Genarg.has_type x (Glbwit wit_late_arg) -> (
+      let late_arg = Genarg.out_gen (Glbwit wit_late_arg) x in
+      match snd late_args_map |> LateArgMap.find_opt late_arg with
+      | Some v -> Some v
+      | None -> None
+    )
+    | Glbwit (ExtraArg tag) when Genarg.has_type x (Glbwit wit_tactic) -> (
+      let tac = Genarg.out_gen (Glbwit wit_tactic) x in
+      match tac.v with
+      | TacArg (TacGeneric (_, v)) -> Some v
+      | _ ->
+        let env = Global.env () in
+        let sigma = Evd.from_env env in
+        debug_deref (fun () -> Pp.str "unknown tactic: " ++ Pptactic.pr_glob_tactic env sigma tac);
+        None
+    )
+    | Glbwit (ExtraArg tag) when Genarg.has_type x (Glbwit wit_value) -> (
+      let (Dyn (typ, y) as val_) = Genarg.out_gen (Glbwit wit_value) x in
+      match argument_type with
+      | Some (ArgumentType argument_type) -> (
+        match project (Topwit argument_type) val_ with
+        | Some z ->
+          debug_deref (fun () -> Pp.str "prj!");
+          Some (Genarg.in_gen (Glbwit wit_value_of_corrent_type) val_)
+        | None -> None
+      )
+      | None ->
+        match Val.eq typ Val.typ_list with
+        | Some Refl -> Some (Genarg.in_gen (Glbwit (ListArg wit_value)) y)
+        | None ->
+          match Val.eq typ Val.typ_opt with
+          | Some Refl -> Some (Genarg.in_gen (Glbwit (OptArg wit_value)) y)
+          | None ->
+            match Val.eq typ Val.typ_pair with
+            | Some Refl -> Some (Genarg.in_gen (Glbwit (PairArg (wit_value, wit_value))) y)
+            | None -> None
+    )
+    | _ -> None in
+  Pptactic.current_dereffer := {
+    deref = fun env sigma argument_type x ->
+      debug_deref (fun () -> Genarg.pr_argument_type (Genarg.genarg_tag x));
+      match f env sigma argument_type x with
+      | Some v -> !Pptactic.current_dereffer.deref env sigma argument_type v
+      | None -> debug_deref (fun () -> Pp.str "==="); x
+  }
 
 (** {5 Printed args} *)
 

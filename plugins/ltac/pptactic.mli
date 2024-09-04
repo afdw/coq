@@ -126,6 +126,9 @@ val pr_clauses : (* default: *) bool option ->
   ('a -> Pp.t) -> 'a Locus.clause_expr -> Pp.t
   (* Some true = default is concl; Some false = default is all; None = no default *)
 
+type dereffer = {deref : 'l. Environ.env -> Evd.evar_map -> argument_type option -> 'l generic_argument -> 'l generic_argument}
+val current_dereffer : dereffer ref
+
 val pr_raw_generic : env -> Evd.evar_map -> entry_relative_level option -> rlevel generic_argument -> Pp.t
 
 val pr_glb_generic : env -> Evd.evar_map -> entry_relative_level option -> glevel generic_argument -> Pp.t
