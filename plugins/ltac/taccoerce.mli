@@ -101,6 +101,8 @@ val wit_constr_under_binders : (Empty.t, Empty.t, Ltac_pretype.constr_under_bind
 
 val wit_value : (Val.t, Val.t, Val.t) genarg_type
 
+val wit_value_of_corrent_type : (Val.t, Val.t, Val.t) genarg_type
+
 val error_ltac_variable : ?loc:Loc.t -> Id.t ->
   (Environ.env * Evd.evar_map) option -> Value.t -> string -> 'a
 

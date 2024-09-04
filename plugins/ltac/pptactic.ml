@@ -317,6 +317,9 @@ let string_of_genarg_arg (ArgumentType arg) =
 
   let pr_tactic_arg prtac arg = prtac LevelSome (CAst.make (TacArg arg))
 
+  type dereffer = {deref : 'l. Environ.env -> Evd.evar_map -> argument_type option -> 'l generic_argument -> 'l generic_argument}
+  let current_dereffer = ref {deref = fun _ _ _ x -> x}
+
   let is_genarg tag wit =
     let ArgT.Any tag = tag in
     argument_type_eq (ArgumentType (ExtraArg tag)) wit
@@ -335,31 +338,37 @@ let string_of_genarg_arg (ArgumentType arg) =
 
   let is_raw_arg wit =
     match wit with
-    | ArgumentType (ExtraArg tag) when ArgT.repr tag = "late_arg" || ArgT.repr tag = "printed_arg" -> true
+    | ArgumentType (ExtraArg tag) when (* ArgT.repr tag = "late_arg" || *) ArgT.repr tag = "printed_arg" || ArgT.repr tag = "value_of_correct_type" -> true
     | _ -> false
 
-  let rec pr_any_arg : type l. (_ -> l generic_argument -> Pp.t) -> _ -> l generic_argument -> Pp.t =
-  fun prtac symb arg -> match symb with
+  let rec pr_any_arg : type l. _ -> _ -> (_ -> l generic_argument -> Pp.t) -> _ -> l generic_argument -> Pp.t =
+  fun env sigma prtac symb arg ->
+  let argument_type =
+    match symb with
+    | Extend.Uentry (ArgT.Any tag) -> Some (ArgumentType (ExtraArg tag))
+    | _ -> None in
+  let arg = !current_dereffer.deref env sigma argument_type arg in
+  match symb with
   | Extend.Uentry tag when is_genarg tag (genarg_tag arg) || is_raw_arg (genarg_tag arg) -> prtac LevelSome arg
   | Extend.Ulist1 s | Extend.Ulist0 s ->
     begin match get_list arg with
     | None -> str "ltac:(" ++ prtac LevelSome arg ++ str ")"
-    | Some l -> pr_sequence (pr_any_arg prtac s) l
+    | Some l -> pr_sequence (pr_any_arg env sigma prtac s) l
     end
   | Extend.Ulist1sep (s, sep) | Extend.Ulist0sep (s, sep) ->
     begin match get_list arg with
     | None -> str "ltac:(" ++ prtac LevelSome arg ++ str ")"
-    | Some l -> prlist_with_sep (fun () -> str sep) (pr_any_arg prtac s) l
+    | Some l -> prlist_with_sep (fun () -> str sep) (pr_any_arg env sigma prtac s) l
     end
   | Extend.Uopt s ->
     begin match get_opt arg with
     | None -> str "ltac:(" ++ prtac LevelSome arg ++ str ")"
-    | Some l -> pr_opt (pr_any_arg prtac s) l
+    | Some l -> pr_opt (pr_any_arg env sigma prtac s) l
     end
   | Extend.Uentry _ | Extend.Uentryl _ ->
     str "ltac:(" ++ prtac LevelSome arg ++ str ")"
 
-  let pr_targ prtac symb arg = match symb with
+  let pr_targ env sigma prtac symb arg = match symb with
   | Extend.Uentry tag when is_genarg tag (ArgumentType wit_tactic) ->
     prtac LevelSome arg
   | Extend.Uentryl (_, l) -> prtac (LevelLe l) arg
@@ -367,7 +376,7 @@ let string_of_genarg_arg (ArgumentType arg) =
     match arg with
     | TacGeneric (isquot,arg) ->
       let pr l arg = prtac l (TacGeneric (isquot,arg)) in
-      pr_any_arg pr symb arg
+      pr_any_arg env sigma pr symb arg
     | _ -> str "ltac:(" ++ prtac LevelSome arg ++ str ")"
 
   let pr_raw_extend_rec prtac =
@@ -375,15 +384,15 @@ let string_of_genarg_arg (ArgumentType arg) =
   let pr_glob_extend_rec prtac =
     pr_extend_gen (pr_tactic_arg prtac)
 
-  let pr_raw_notation prtac lev prods args =
-    pr_notation_gen (pr_targ (fun l a -> prtac l (CAst.make @@ TacArg a))) lev prods args
-  let pr_glob_notation prtac lev prods args =
-    pr_notation_gen (pr_targ (fun l a -> prtac l (CAst.make @@ TacArg a))) lev prods args
+  let pr_raw_notation env sigma prtac lev prods args =
+    pr_notation_gen (pr_targ env sigma (fun l a -> prtac l (CAst.make @@ TacArg a))) lev prods args
+  let pr_glob_notation env sigma prtac lev prods args =
+    pr_notation_gen (pr_targ env sigma (fun l a -> prtac l (CAst.make @@ TacArg a))) lev prods args
 
-  let pr_raw_alias prtac lev key args =
-    pr_alias_gen (pr_targ (fun l a -> prtac l (CAst.make @@ TacArg a))) lev key args
-  let pr_glob_alias prtac lev key args =
-    pr_alias_gen (pr_targ (fun l a -> prtac l (CAst.make @@ TacArg a))) lev key args
+  let pr_raw_alias env sigma prtac lev key args =
+    pr_alias_gen (pr_targ env sigma (fun l a -> prtac l (CAst.make @@ TacArg a))) lev key args
+  let pr_glob_alias env sigma prtac lev key args =
+    pr_alias_gen (pr_targ env sigma (fun l a -> prtac l (CAst.make @@ TacArg a))) lev key args
 
   (**********************************************************************)
   (* The tactic printer                                                 *)
@@ -1156,8 +1165,8 @@ let pr_goal_selector ~toplevel s =
       pr_occvar = pr_or_var int;
       pr_generic = Pputils.pr_raw_generic;
       pr_extend = pr_raw_extend_rec @@ pr_raw_tactic_level env sigma;
-      pr_notation = pr_raw_notation @@ pr_raw_tactic_level env sigma;
-      pr_alias = pr_raw_alias @@ pr_raw_tactic_level env sigma;
+      pr_notation = pr_raw_notation env sigma @@ pr_raw_tactic_level env sigma;
+      pr_alias = pr_raw_alias env sigma @@ pr_raw_tactic_level env sigma;
       pr_make_var = (fun s -> Libnames.qualid_of_ident s);
     } in
     make_pr_tac env sigma
@@ -1192,8 +1201,8 @@ let pr_goal_selector ~toplevel s =
         pr_occvar = pr_or_var int;
         pr_generic = Pputils.pr_glb_generic;
         pr_extend = pr_glob_extend_rec prtac;
-        pr_notation = pr_glob_notation prtac;
-        pr_alias = pr_glob_alias prtac;
+        pr_notation = pr_glob_notation env sigma prtac;
+        pr_alias = pr_glob_alias env sigma prtac;
         pr_make_var = (fun s -> Locus.ArgVar (CAst.make s));
       } in
       make_pr_tac env sigma
