@@ -618,11 +618,7 @@ let tag_var = tag Tag.variable
   | Rawarg of Genarg.raw_generic_argument
   | Globarg of Genarg.glob_generic_argument
 
-  let pr_genarg return n arg =
-    (* In principle this may use the env/sigma, in practice not sure if it
-       does except through pr_constr_expr in beautify mode. *)
-    let env = Global.env() in
-    let sigma = Evd.from_env env in
+  let pr_genarg env sigma return n arg =
     let name, parg = let open Genarg in
       match arg with
       | Globarg arg ->
@@ -649,13 +645,14 @@ let tag_var = tag Tag.variable
     let pp = if String.is_empty name then parg else str name ++ str ":" ++ surround parg in
     return (fun _ -> pp) latom
 
-  let pr pr sep lev_after inherited a =
+  let pr pr env sigma sep lev_after inherited a =
     let return cmds prec =
       let no_surround = Notation.prec_less prec inherited in
       let lev_after = if no_surround then lev_after else no_after in
       let pp = tag_constr_expr a (cmds lev_after) in
       let pp = if no_surround then pp else surround pp in
       pr_with_comments ?loc:a.CAst.loc (sep() ++ pp) in
+    let pr = pr env sigma in
     match CAst.(a.v) with
       | CRef (r, us) ->
         return (fun _ -> pr_cref r us) latom
@@ -770,8 +767,8 @@ let tag_var = tag Tag.variable
       | CHole (Some (GNamedHole (true, id))) ->
         return (fun lev_after -> str "?[?" ++ pr_id id ++ str "]") latom
       | CHole _ -> return (fun lev_after -> str "_") latom
-      | CGenarg arg -> pr_genarg return inherited (Rawarg arg)
-      | CGenargGlob arg -> pr_genarg return inherited (Globarg arg)
+      | CGenarg arg -> pr_genarg env sigma return inherited (Rawarg arg)
+      | CGenargGlob arg -> pr_genarg env sigma return inherited (Globarg arg)
       | CEvar (n,l) ->
         return (fun lev_after -> pr_evar (pr mt) n l) latom
       | CPatVar p ->
@@ -810,15 +807,15 @@ let tag_var = tag Tag.variable
 
   let modular_constr_pr = pr
   let rec fix rf x = rf (fix rf) x
-  let pr = fix modular_constr_pr mt
+  let pr env sigma = fix modular_constr_pr env sigma mt
 
-  let pr lev_after prec = function
+  let pr env sigma lev_after prec = function
     (* A toplevel printer hack mimicking parsing, incidentally meaning
        that we cannot use [pr] correctly anymore in a recursive loop
        if the current expr is followed by other exprs which would be
        interpreted as arguments *)
     | { CAst.v = CAppExpl ((f,us),[]) } -> str "@" ++ pr_cref f us
-    | c -> pr lev_after prec c
+    | c -> pr env sigma lev_after prec c
 
   let transf env sigma c =
     if !Flags.beautify_file then
@@ -827,7 +824,7 @@ let tag_var = tag Tag.variable
     else c
 
   let pr_expr env sigma lev_after prec c =
-    pr lev_after prec (transf env sigma c)
+    pr env sigma lev_after prec (transf env sigma c)
 
   let pr_simpleconstr_env env sigma = pr_expr env sigma no_after lsimpleconstr
   let pr_top_env env sigma = pr_expr env sigma no_after ltop
@@ -843,8 +840,16 @@ let tag_var = tag Tag.variable
 
   let set_term_pr = (:=) term_pr
 
-  let pr_simpleconstr = pr no_after lsimpleconstr
-  let pr_top = pr no_after ltop
+  (* In principle this may use the env/sigma, in practice not sure if it
+     does except through pr_constr_expr in beautify mode. *)
+  let pr_simpleconstr =
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    pr env sigma no_after lsimpleconstr
+  let pr_top =
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    pr env sigma no_after ltop
 
   let pr_constr_expr_n n c = pr_expr n c no_after
   let pr_constr_expr c   = !term_pr.pr_constr_expr   c
@@ -852,6 +857,9 @@ let tag_var = tag Tag.variable
   let pr_constr_pattern_expr c  = !term_pr.pr_constr_pattern_expr  c
   let pr_lconstr_pattern_expr c = !term_pr.pr_lconstr_pattern_expr c
 
-  let pr_cases_pattern_expr = pr_patt (pr no_after ltop) no_after ltop
+  let pr_cases_pattern_expr =
+    let env = Global.env () in
+    let sigma = Evd.from_env env in
+    pr_patt (pr env sigma no_after ltop) no_after ltop
 
   let pr_binders env sigma = pr_undelimited_binders spc true (pr_expr env sigma no_after ltop)

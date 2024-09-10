@@ -86,5 +86,5 @@ val pr_simpleconstr : constr_expr -> Pp.t
 val pr_top : constr_expr -> Pp.t
 
 val modular_constr_pr :
-  ((unit->Pp.t) -> int option -> entry_relative_level -> constr_expr -> Pp.t) ->
-  (unit->Pp.t) -> int option -> entry_relative_level -> constr_expr -> Pp.t
+  (Environ.env -> Evd.evar_map -> (unit->Pp.t) -> int option -> entry_relative_level -> constr_expr -> Pp.t) ->
+  Environ.env -> Evd.evar_map -> (unit->Pp.t) -> int option -> entry_relative_level -> constr_expr -> Pp.t
