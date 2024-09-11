@@ -49,6 +49,9 @@ end
 
 (** {5 Coercion functions} *)
 
+val in_gen : 'a typed_abstract_argument_type -> 'a -> Value.t
+val out_gen : 'a typed_abstract_argument_type -> Value.t -> 'a
+
 val coerce_to_constr_context : Value.t -> Constr_matching.context
 
 val coerce_var_to_ident : bool -> Environ.env -> Evd.evar_map -> Value.t -> Id.t
@@ -142,6 +145,7 @@ val wit_late_arg : (late_arg, late_arg, Empty.t) genarg_type
 
 val glob_late_arg_tac_arg : ?isquot:string -> late_arg -> Tacexpr.glob_tactic_arg
 val glob_late_arg_tac : ?isquot:string -> late_arg -> Tacexpr.glob_tactic_expr
+val glob_late_arg_intro_pattern : late_arg -> Tacexpr.g_trm intro_pattern_expr
 
 (** {5 Printed args} *)
 

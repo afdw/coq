@@ -663,6 +663,9 @@ let glob_late_arg_tac_arg ?isquot late_arg =
 let glob_late_arg_tac ?isquot late_arg =
   CAst.make (Tacexpr.TacArg (glob_late_arg_tac_arg ?isquot late_arg))
 
+let glob_late_arg_intro_pattern late_arg =
+  IntroAction (IntroApplyOn (CAst.make (DAst.make (Glob_term.GGenarg (GenArg (Glbwit wit_late_arg, late_arg))), None), CAst.make (IntroForthcoming false)))
+
 let debug_deref = CDebug.create ~name:"deref" ()
 
 let _ =

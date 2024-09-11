@@ -1404,8 +1404,8 @@ let () =
     (pr_or_by_notation pr_qualid) (pr_or_var (pr_located pr_global)) pr_global;
   register_basic_print0 wit_ident pr_id pr_id pr_id;
   register_basic_print0 wit_hyp pr_lident pr_lident pr_id;
-  register_print0 wit_intropattern pr_raw_intro_pattern pr_glob_intro_pattern (fst %> pr_glob_intro_pattern %> Genprint.top_printer_result_of_printer_result) [@warning "-3"];
-  register_print0 wit_simple_intropattern pr_raw_intro_pattern pr_glob_intro_pattern (fst %> pr_glob_intro_pattern %> Genprint.top_printer_result_of_printer_result);
+  register_print0 wit_intropattern pr_raw_intro_pattern pr_glob_intro_pattern pr_intro_pattern_env [@warning "-3"];
+  register_print0 wit_simple_intropattern pr_raw_intro_pattern pr_glob_intro_pattern pr_intro_pattern_env;
   Genprint.register_print0
     wit_clause_dft_concl
     (lift (pr_clauses (Some true) pr_lident))

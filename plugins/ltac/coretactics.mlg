@@ -82,13 +82,13 @@ END
 
 TACTIC EXTEND left_with
 | [ "left" "with" bindings(bl) ] -> {
-    Tacticals.tclDELAYEDWITHHOLES false (snd bl) (fun bl -> Tactics.left_with_bindings false bl)
+    Tacticals.tclDELAYEDWITHHOLES false bl (fun bl -> Tactics.left_with_bindings false bl)
   }
 END
 
 TACTIC EXTEND eleft_with
 | [ "eleft" "with" bindings(bl) ] -> {
-    Tacticals.tclDELAYEDWITHHOLES true (snd bl) (fun bl -> Tactics.left_with_bindings true bl)
+    Tacticals.tclDELAYEDWITHHOLES true bl (fun bl -> Tactics.left_with_bindings true bl)
   }
 END
 
@@ -104,13 +104,13 @@ END
 
 TACTIC EXTEND right_with
 | [ "right" "with" bindings(bl) ] -> {
-    Tacticals.tclDELAYEDWITHHOLES false (snd bl) (fun bl -> Tactics.right_with_bindings false bl)
+    Tacticals.tclDELAYEDWITHHOLES false bl (fun bl -> Tactics.right_with_bindings false bl)
   }
 END
 
 TACTIC EXTEND eright_with
 | [ "eright" "with" bindings(bl) ] -> {
-    Tacticals.tclDELAYEDWITHHOLES true (snd bl) (fun bl -> Tactics.right_with_bindings true bl)
+    Tacticals.tclDELAYEDWITHHOLES true bl (fun bl -> Tactics.right_with_bindings true bl)
   }
 END
 
@@ -123,7 +123,7 @@ TACTIC EXTEND constructor
   }
 | [ "constructor" nat_or_var(i) "with" bindings(bl) ] -> {
     let tac bl = Tactics.constructor_tac false None i bl in
-    Tacticals.tclDELAYEDWITHHOLES false (snd bl) tac
+    Tacticals.tclDELAYEDWITHHOLES false bl tac
   }
 END
 
@@ -134,7 +134,7 @@ TACTIC EXTEND econstructor
   }
 | [ "econstructor" nat_or_var(i) "with" bindings(bl) ] -> {
     let tac bl = Tactics.constructor_tac true None i bl in
-    Tacticals.tclDELAYEDWITHHOLES true (snd bl) tac
+    Tacticals.tclDELAYEDWITHHOLES true bl tac
   }
 END
 
@@ -142,10 +142,10 @@ END
 
 TACTIC EXTEND specialize
 | [ "specialize" constr_with_bindings(c) ] -> {
-    Tacticals.tclDELAYEDWITHHOLES false (snd c) (fun c -> Tactics.specialize c None)
+    Tacticals.tclDELAYEDWITHHOLES false c (fun c -> Tactics.specialize c None)
   }
 | [ "specialize" constr_with_bindings(c) "as" simple_intropattern(ipat) ] -> {
-    Tacticals.tclDELAYEDWITHHOLES false (snd c) (fun c -> Tactics.specialize c (Some (snd ipat)))
+    Tacticals.tclDELAYEDWITHHOLES false c (fun c -> Tactics.specialize c (Some ipat))
   }
 END
 
@@ -169,24 +169,24 @@ END
 
 TACTIC EXTEND split_with
 | [ "split" "with" bindings(bl) ] -> {
-    Tacticals.tclDELAYEDWITHHOLES false (snd bl) (fun bl -> Tactics.split_with_bindings false [bl])
+    Tacticals.tclDELAYEDWITHHOLES false bl (fun bl -> Tactics.split_with_bindings false [bl])
   }
 END
 
 TACTIC EXTEND esplit_with
 | [ "esplit" "with" bindings(bl) ] -> {
-    Tacticals.tclDELAYEDWITHHOLES true (snd bl) (fun bl -> Tactics.split_with_bindings true [bl])
+    Tacticals.tclDELAYEDWITHHOLES true bl (fun bl -> Tactics.split_with_bindings true [bl])
   }
 END
 
 TACTIC EXTEND exists
 | [ "exists" ] -> { Tactics.split_with_bindings false [NoBindings] }
-| [ "exists" ne_bindings_list_sep(bll, ",") ] -> { Tactics.split_with_delayed_bindings false (List.map snd bll) }
+| [ "exists" ne_bindings_list_sep(bll, ",") ] -> { Tactics.split_with_delayed_bindings false bll }
 END
 
 TACTIC EXTEND eexists
 | [ "eexists" ] -> { Tactics.split_with_bindings true [NoBindings] }
-| [ "eexists" ne_bindings_list_sep(bll, ",") ] -> { Tactics.split_with_delayed_bindings true (List.map snd bll) }
+| [ "eexists" ne_bindings_list_sep(bll, ",") ] -> { Tactics.split_with_delayed_bindings true bll }
 END
 
 (** Intro *)

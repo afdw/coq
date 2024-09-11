@@ -139,7 +139,7 @@ let f_avoid_ids : Id.Set.t TacStore.field = TacStore.field "f_avoid_ids"
 let f_debug : debug_info TacStore.field = TacStore.field "f_debug"
 let f_trace : ltac_trace TacStore.field = TacStore.field "f_trace"
 let f_loc : Loc.t TacStore.field = TacStore.field "f_loc"
-let f_current_late_arg : late_arg TacStore.field = TacStore.field "f_current_late_arg"
+let f_current_late_arg : (late_arg, late_arg list) Either.t TacStore.field = TacStore.field "f_current_late_arg"
 
 (* Signature for interpretation: val_interp and interpretation functions *)
 type interp_sign = Geninterp.interp_sign =
@@ -169,7 +169,10 @@ let ensure_loc loc ist =
     | Some _ -> ist
 
 let set_current_late_arg ist current_late_arg =
-  {ist with extra = TacStore.set ist.extra f_current_late_arg current_late_arg}
+  {ist with extra = TacStore.set ist.extra f_current_late_arg (Left current_late_arg)}
+
+let set_current_late_args ist current_late_args =
+  {ist with extra = TacStore.set ist.extra f_current_late_arg (Right current_late_args)}
 
 let populate_late_arg late_arg tac =
   populate_glob_late_arg late_arg (Some (GenArg (Glbwit wit_tactic, tac)))
@@ -177,12 +180,26 @@ let populate_late_arg late_arg tac =
 let wrap_populate_late_arg late_arg tac t =
   wrap_populate_glob_late_arg late_arg (Some (GenArg (Glbwit wit_tactic, tac))) t
 
-let populate_current_late_arg ist tac =
-  let current_late_arg = TacStore.get ist.extra f_current_late_arg |> Option.default top_late_arg in
-  populate_late_arg current_late_arg tac
+let populate_intro_pattern_late_arg late_arg pat =
+  populate_glob_late_arg late_arg (Some (GenArg (Glbwit wit_intro_pattern, pat)))
 
 let assign_late_arg dest_late_arg src_late_arg =
   populate_glob_late_arg dest_late_arg (Some (GenArg (Glbwit wit_late_arg, src_late_arg)))
+
+let populate_current_late_arg ist tac =
+  let current_late_arg =
+    match TacStore.get ist.extra f_current_late_arg with
+    | Some (Left current_late_arg) -> current_late_arg
+    | Some (Right _) -> failwith "list not expected"
+    | None -> top_late_arg in
+  populate_late_arg current_late_arg tac
+
+let populate_current_intro_pattern_late_args ist pats =
+  let current_late_args =
+    match TacStore.get ist.extra f_current_late_arg with
+    | Some (Right current_late_args) -> current_late_args
+    | Some (Left _) | None -> failwith "list expected" in
+  List.combine current_late_args pats |> Proofview.Monad.List.iter (fun (late_arg, pat) -> populate_intro_pattern_late_arg late_arg pat)
 
 let catching_error call_trace fail (e, info) =
   let inner_trace =
@@ -1917,13 +1934,32 @@ and interp_ltac_constr ist c k =
 and interp_atomic ist tac : unit Proofview.tactic =
   match tac with
   (* Basic tactics *)
-  | TacIntroPattern (ev,l) ->
-    tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacIntroPattern")) @@
+  | TacIntroPattern (ev,pats) ->
       Proofview.Goal.enter begin fun gl ->
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
-        let l' = interp_intro_pattern_list_as_list ist env sigma l in
-        Tactics.intro_patterns ev l'
+        let pat_late_args = pats |> List.map (fun _ -> new_late_arg ()) in
+        (List.combine pats pat_late_args |> Proofview.Monad.List.iter (fun (pat, pat_late_arg) ->
+          populate_intro_pattern_late_arg pat_late_arg pat
+        )) <*>
+        populate_current_late_arg ist
+          (CAst.make (TacAtom (TacIntroPattern (
+            ev,
+            pat_late_args |> List.map (fun pat_late_arg -> CAst.make (glob_late_arg_intro_pattern pat_late_arg))
+          )))) <*>
+        tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacIntroPattern")) @@
+        (* Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        (List.combine pats pat_late_args |> Ftactic.List.fold_left (fun (deferred_id, pats_interp) (pat, pat_late_arg) ->
+          interp_tacarg_ftactic deferred_id (set_current_late_arg ist pat_late_arg) pat >>= fun pat_interp ->
+          Ftactic.return (pat_interp.Proofview.Tagged.deferred_id, pat_interp.Proofview.Tagged.v :: pats_interp)
+        ) (deferred_id, [])) >>= fun (deferred_id, pats_interp) ->
+        let pats_interp = List.rev pats_interp in *)
+        (* let pats_interp = interp_intro_pattern_list_as_list ist env sigma pats in *)
+        (* Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        let pats_interp = interp_intro_pattern_list_as_list deferred_id (set_current_late_args ist pat_late_args) env sigma pats in
+        Tactics.intro_patterns ev pats_interp *)
+        let pats_interp = interp_intro_pattern_list_as_list ist env sigma pats in
+        Tactics.intro_patterns ev pats_interp
       end
   | TacApply (a,ev,cb,cl) ->
     tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacApply")) @@
@@ -2318,18 +2354,21 @@ let () =
 let () =
   declare_uniform wit_string
 
-let lift f = (); fun deferred_id ist x ->
+let lift wit f = (); fun deferred_id ist x ->
   let (>>=) = Ftactic.bind in
   Proofview.Trace.tag_deferred_contents deferred_id (
     Ftactic.enter (fun gl ->
       let env = Proofview.Goal.env gl in
       let sigma = Proofview.Goal.sigma gl in
-      Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-      Ftactic.return (Proofview.Tagged.make deferred_id (f ist env sigma x))
+      let v = f ist env sigma x in
+      populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, GenArg (glbwit wit_value, Taccoerce.in_gen (topwit wit) v))))) <*>
+      tag_print ist (Proofview_monad.Info.Builtin (Genarg.pr_argument_type (ArgumentType wit))) @@
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        Ftactic.return (Proofview.Tagged.make deferred_id v)
     )
   )
 
-let lifts f = (); fun deferred_id ist x ->
+let lifts wit f = (); fun deferred_id ist x ->
   let (>>=) = Ftactic.bind in
   Proofview.Trace.tag_deferred_contents deferred_id (
     Ftactic.enter (fun gl ->
@@ -2339,8 +2378,10 @@ let lifts f = (); fun deferred_id ist x ->
       Proofview.Unsafe.tclEVARS sigma <*>
       (* FIXME once we don't need to catch side effects *)
       Proofview.Unsafe.tclSETENV (Global.env()) <*>
-      Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
-      Ftactic.return (Proofview.Tagged.make deferred_id v)
+      populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, GenArg (glbwit wit_value, Taccoerce.in_gen (topwit wit) v))))) <*>
+      tag_print ist (Proofview_monad.Info.Builtin (Genarg.pr_argument_type (ArgumentType wit))) @@
+        Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
+        Ftactic.return (Proofview.Tagged.make deferred_id v)
     )
   )
 
@@ -2376,21 +2417,22 @@ let interp_pre_ident ist env sigma s =
   s |> Id.of_string |> interp_ident ist env sigma |> Id.to_string
 
 let () =
-  register_interp0 wit_int_or_var (fun deferred_id ist n -> Ftactic.return (Proofview.Tagged.make deferred_id (interp_int_or_var ist n)));
-  register_interp0 wit_nat_or_var (fun deferred_id ist n -> Ftactic.return (Proofview.Tagged.make deferred_id (interp_int_or_var ist n)));
-  register_interp0 wit_smart_global (lift interp_reference);
-  register_interp0 wit_ref (lift interp_reference);
-  register_interp0 wit_pre_ident (lift interp_pre_ident);
-  register_interp0 wit_ident (lift interp_ident);
-  register_interp0 wit_hyp (lift interp_hyp);
-  register_interp0 wit_intropattern (with_copied_input (lift interp_intro_pattern)) [@warning "-3"];
-  register_interp0 wit_simple_intropattern (with_copied_input (lift interp_intro_pattern));
-  register_interp0 wit_clause_dft_concl (lift interp_clause);
-  register_interp0 wit_constr (lifts interp_constr);
+  register_interp0 wit_int_or_var (lift wit_int_or_var (fun ist _ _ n -> interp_int_or_var ist n));
+  register_interp0 wit_nat_or_var (lift wit_nat_or_var (fun ist _ _ n -> interp_int_or_var ist n));
+  register_interp0 wit_smart_global (lift wit_smart_global interp_reference);
+  register_interp0 wit_ref (lift wit_ref interp_reference);
+  register_interp0 wit_pre_ident (lift wit_pre_ident interp_pre_ident);
+  register_interp0 wit_ident (lift wit_ident interp_ident);
+  register_interp0 wit_hyp (lift wit_hyp interp_hyp);
+  register_interp0 wit_intropattern (lift wit_intropattern interp_intro_pattern) [@warning "-3"];
+  register_interp0 wit_simple_intropattern (lift wit_simple_intropattern interp_intro_pattern);
+  register_interp0 wit_clause_dft_concl (lift wit_clause_dft_concl interp_clause);
+  register_interp0 wit_constr (lifts wit_constr interp_constr);
+  register_interp0 wit_uconstr (lift wit_uconstr interp_uconstr);
   register_interp0 wit_tacvalue (fun deferred_id ist v -> Ftactic.return (Proofview.Tagged.make deferred_id v));
-  register_interp0 Redexpr.wit_red_expr (lifts interp_red_expr);
-  register_interp0 wit_quant_hyp (lift interp_declared_or_quantified_hypothesis);
-  register_interp0 wit_open_constr (lifts interp_open_constr);
+  register_interp0 Redexpr.wit_red_expr (lifts Redexpr.wit_red_expr interp_red_expr);
+  register_interp0 wit_quant_hyp (lift wit_quant_hyp interp_declared_or_quantified_hypothesis);
+  register_interp0 wit_open_constr (lifts wit_open_constr interp_open_constr);
   register_interp0 wit_bindings (with_copied_input interp_bindings');
   register_interp0 wit_constr_with_bindings (with_copied_input interp_constr_with_bindings');
   register_interp0 wit_open_constr_with_bindings (with_copied_input interp_open_constr_with_bindings');
@@ -2411,7 +2453,7 @@ let () =
     ) in
   register_interp0 wit_ltac interp
 
-let () =
+(* let () =
   register_interp0 wit_uconstr (fun deferred_id ist c ->
     Proofview.Trace.tag_deferred_contents deferred_id (
       Ftactic.enter (fun gl ->
@@ -2419,7 +2461,7 @@ let () =
         Ftactic.return (Proofview.Tagged.make deferred_id (interp_uconstr ist (Proofview.Goal.env gl) (Tacmach.project gl) c))
       )
     )
-  )
+  ) *)
 
 (***************************************************************************)
 (* Backwarding recursive needs of tactic glob/interp/eval functions *)
