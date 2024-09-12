@@ -143,10 +143,10 @@ val wrap_populate_glob_late_arg : late_arg -> glob_generic_argument option -> 'a
 
 val wrap_keep_late_args : 'a Proofview.tactic -> 'a Proofview.tactic
 
-val wit_late_arg : (late_arg, late_arg, Empty.t) genarg_type
+val wit_late_arg : (late_arg * raw_generic_argument option, late_arg * glob_generic_argument option, Empty.t) genarg_type
 
-val glob_late_arg_tac_arg : ?isquot:string -> late_arg -> Tacexpr.glob_tactic_arg
-val glob_late_arg_tac : ?isquot:string -> late_arg -> Tacexpr.glob_tactic_expr
+val glob_late_arg_tac_arg : ?isquot:string -> ?default:glob_generic_argument -> late_arg -> Tacexpr.glob_tactic_arg
+val glob_late_arg_tac : ?isquot:string -> ?default:glob_generic_argument -> late_arg -> Tacexpr.glob_tactic_expr
 
 (** {5 Printed args} *)
 
