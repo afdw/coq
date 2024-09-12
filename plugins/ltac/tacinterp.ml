@@ -189,7 +189,7 @@ let populate_current_late_arg_atomic ist tac =
   populate_late_arg_atomic current_late_arg tac
 
 let assign_late_arg dest_late_arg src_late_arg =
-  populate_glob_late_arg dest_late_arg (Some (GenArg (Glbwit wit_late_arg, src_late_arg)))
+  populate_glob_late_arg dest_late_arg (Some (GenArg (Glbwit wit_late_arg, (src_late_arg, None))))
 
 let catching_error call_trace fail (e, info) =
   let inner_trace =
@@ -1805,7 +1805,7 @@ and interp_genarg deferred_id ist x : TaggedVal.t Ftactic.t =
           populate_late_arg element_late_arg (CAst.make (TacArg (TacGeneric (None, GenArg (Glbwit wit, element)))))
         )) <*>
         populate_current_late_arg ist
-          (CAst.make (TacArg (TacGeneric (None, GenArg (Glbwit (ListArg wit_late_arg), elements_late_args))))) <*>
+          (CAst.make (TacArg (TacGeneric (None, GenArg (Glbwit (ListArg wit_late_arg), elements_late_args |> List.map (fun late_arg -> (late_arg, None))))))) <*>
         Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
         (List.combine elements elements_late_args |> Ftactic.List.fold_left (fun (deferred_id, elements) (element, element_late_arg) ->
           interp_genarg deferred_id (set_current_late_arg ist element_late_arg) (Genarg.in_gen (glbwit wit) element) >>= fun element_interp ->

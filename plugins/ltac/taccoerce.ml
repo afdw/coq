@@ -650,31 +650,31 @@ let wrap_keep_late_args t =
   Proofview.Unsafe.tclEVARS sigma <*>
   Proofview.tclUNIT r
 
-let wit_late_arg : (late_arg, late_arg, Empty.t) genarg_type =
+let wit_late_arg : (late_arg * raw_generic_argument option, late_arg * glob_generic_argument option, Empty.t) genarg_type =
   let wit = Genarg.create_arg "late_arg" in
   let () = register_val0 wit None in
   Pptactic.declare_extra_genarg_pprule_with_level
     wit
-    (fun env sigma _ _ _ n late_arg ->
+    (fun env sigma _ _ _ n (late_arg, default) ->
       let store = Evd.get_extra_data sigma in
       let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
-      Pputils.pr_raw_generic env sigma (Some n) (fst late_args_map |> LateArgMap.find late_arg)
+      Pputils.pr_raw_generic env sigma (Some n) (Option.append (fst late_args_map |> LateArgMap.find_opt late_arg) default |> Option.get)
     )
-    (fun env sigma _ _ _ n late_arg ->
+    (fun env sigma _ _ _ n (late_arg, default) ->
       let store = Evd.get_extra_data sigma in
       let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
       (* Printf.eprintf "?? %d %d\n" late_arg (snd late_args_map |> LateArgMap.cardinal); *)
-      Pputils.pr_glb_generic env sigma (Some n) (snd late_args_map |> LateArgMap.find late_arg)
+      Pputils.pr_glb_generic env sigma (Some n) (Option.append (snd late_args_map |> LateArgMap.find_opt late_arg) default |> Option.get)
     )
     (fun env sigma _ _ _ n -> Empty.abort)
     Ppconstr.ltop Ppconstr.lsimpleconstr;
   wit
 
-let glob_late_arg_tac_arg ?isquot late_arg =
-  Tacexpr.TacGeneric (isquot, GenArg (Glbwit wit_late_arg, late_arg))
+let glob_late_arg_tac_arg ?isquot ?default late_arg =
+  Tacexpr.TacGeneric (isquot, GenArg (Glbwit wit_late_arg, (late_arg, default)))
 
-let glob_late_arg_tac ?isquot late_arg =
-  CAst.make (Tacexpr.TacArg (glob_late_arg_tac_arg ?isquot late_arg))
+let glob_late_arg_tac ?isquot ?default late_arg =
+  CAst.make (Tacexpr.TacArg (glob_late_arg_tac_arg ?isquot ?default late_arg))
 
 let debug_deref = CDebug.create ~name:"deref" ()
 
@@ -684,10 +684,10 @@ let _ =
     let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
     function (GenArg (wit, arg) as x) -> match wit with
     | Rawwit (ExtraArg tag) when Genarg.has_type x (Rawwit wit_late_arg) -> (
-      let late_arg = Genarg.out_gen (Rawwit wit_late_arg) x in
+      let (late_arg, default) = Genarg.out_gen (Rawwit wit_late_arg) x in
       match fst late_args_map |> LateArgMap.find_opt late_arg with
       | Some v -> Some v
-      | None -> None
+      | None -> default
     )
     | Rawwit (ExtraArg tag) when Genarg.has_type x (Rawwit wit_tactic) -> (
       let tac = Genarg.out_gen (Rawwit wit_tactic) x in
@@ -717,10 +717,10 @@ let _ =
             | None -> None
     )
     | Glbwit (ExtraArg tag) when Genarg.has_type x (Glbwit wit_late_arg) -> (
-      let late_arg = Genarg.out_gen (Glbwit wit_late_arg) x in
+      let (late_arg, default) = Genarg.out_gen (Glbwit wit_late_arg) x in
       match snd late_args_map |> LateArgMap.find_opt late_arg with
       | Some v -> Some v
-      | None -> None
+      | None -> default
     )
     | Glbwit (ExtraArg tag) when Genarg.has_type x (Glbwit wit_tactic) -> (
       let tac = Genarg.out_gen (Glbwit wit_tactic) x in
