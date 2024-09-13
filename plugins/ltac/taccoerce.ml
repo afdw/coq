@@ -573,14 +573,6 @@ let error_ltac_variable ?loc id env v s =
 
 (** {5 Late args} *)
 
-type late_arg = int
-
-let late_arg_ctr = ref 0
-
-let new_late_arg () = incr late_arg_ctr; !late_arg_ctr
-
-module LateArgMap = Map.Make(Int)
-
 type late_args_map = raw_generic_argument LateArgMap.t * glob_generic_argument LateArgMap.t
 
 let f_late_args_map : late_args_map Evd.Store.field = Evd.Store.field "late_args_map"
@@ -630,7 +622,7 @@ let populate_glob_late_arg late_arg v =
   ) in
   let store = Evd.Store.set store f_late_args_map late_args_map in
   let sigma = Evd.set_extra_data store sigma in
-  (* Printf.eprintf "!! %d %d\n" late_arg (snd late_args_map |> LateArgMap.cardinal); *)
+  (* Printf.eprintf "!! %d %d\n" (Obj.magic late_arg) (snd late_args_map |> LateArgMap.cardinal); *)
   Proofview.Unsafe.tclEVARS sigma
 
 let wrap_populate_glob_late_arg late_arg v tac =
@@ -650,11 +642,10 @@ let wrap_keep_late_args t =
   Proofview.Unsafe.tclEVARS sigma <*>
   Proofview.tclUNIT r
 
-let wit_late_arg : (late_arg * raw_generic_argument option, late_arg * glob_generic_argument option, Empty.t) genarg_type =
-  let wit = Genarg.create_arg "late_arg" in
-  let () = register_val0 wit None in
+let () =
+  let () = register_val0 wit_late_arg None in
   Pptactic.declare_extra_genarg_pprule_with_level
-    wit
+    wit_late_arg
     (fun env sigma _ _ _ n (late_arg, default) ->
       let store = Evd.get_extra_data sigma in
       let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
@@ -663,12 +654,11 @@ let wit_late_arg : (late_arg * raw_generic_argument option, late_arg * glob_gene
     (fun env sigma _ _ _ n (late_arg, default) ->
       let store = Evd.get_extra_data sigma in
       let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
-      (* Printf.eprintf "?? %d %d\n" late_arg (snd late_args_map |> LateArgMap.cardinal); *)
+      (* Printf.eprintf "?? %d %d\n" (Obj.magic late_arg) (snd late_args_map |> LateArgMap.cardinal); *)
       Pputils.pr_glb_generic env sigma (Some n) (Option.append (snd late_args_map |> LateArgMap.find_opt late_arg) default |> Option.get)
     )
     (fun env sigma _ _ _ n -> Empty.abort)
-    Ppconstr.ltop Ppconstr.lsimpleconstr;
-  wit
+    Ppconstr.ltop Ppconstr.lsimpleconstr
 
 let glob_late_arg_tac_arg ?isquot ?default late_arg =
   Tacexpr.TacGeneric (isquot, GenArg (Glbwit wit_late_arg, (late_arg, default)))
@@ -764,15 +754,13 @@ let _ =
 
 (** {5 Printed args} *)
 
-let wit_printed_arg : (Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg) genarg_type =
-  let wit = Genarg.create_arg "printed_arg" in
-  let () = register_val0 wit None in
+let () =
+  let () = register_val0 wit_printed_arg None in
   Pptactic.declare_extra_genarg_pprule
-    wit
+    wit_printed_arg
     (fun env sigma _ _ _ msg -> msg ())
     (fun env sigma _ _ _ msg -> msg ())
-    (fun env sigma _ _ _ msg -> msg ());
-  wit
+    (fun env sigma _ _ _ msg -> msg ())
 
 let glob_printed_arg_tac_arg ?isquot msg =
   Tacexpr.TacGeneric (isquot, GenArg (Glbwit wit_printed_arg, msg))

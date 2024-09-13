@@ -125,10 +125,6 @@ val pr_value : (Environ.env * Evd.evar_map) option -> Geninterp.Val.t -> Pp.t
 
 (** {5 Late args} *)
 
-type late_arg
-
-val new_late_arg : unit -> late_arg
-
 type late_args_map
 
 val f_late_args_map : late_args_map Evd.Store.field
@@ -143,14 +139,10 @@ val wrap_populate_glob_late_arg : late_arg -> glob_generic_argument option -> 'a
 
 val wrap_keep_late_args : 'a Proofview.tactic -> 'a Proofview.tactic
 
-val wit_late_arg : (late_arg * raw_generic_argument option, late_arg * glob_generic_argument option, Empty.t) genarg_type
-
 val glob_late_arg_tac_arg : ?isquot:string -> ?default:glob_generic_argument -> late_arg -> Tacexpr.glob_tactic_arg
 val glob_late_arg_tac : ?isquot:string -> ?default:glob_generic_argument -> late_arg -> Tacexpr.glob_tactic_expr
 
 (** {5 Printed args} *)
-
-val wit_printed_arg : (Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg) genarg_type
 
 val glob_printed_arg_tac_arg : ?isquot:string -> Proofview_monad.Info.lazy_msg -> Tacexpr.glob_tactic_arg
 val glob_printed_arg_tac : ?isquot:string -> Proofview_monad.Info.lazy_msg -> Tacexpr.glob_tactic_expr

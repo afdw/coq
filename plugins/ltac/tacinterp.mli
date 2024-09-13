@@ -50,9 +50,9 @@ open Genintern
 val f_avoid_ids : Id.Set.t TacStore.field
 val f_debug : debug_info TacStore.field
 
-val set_current_late_arg : interp_sign -> Taccoerce.late_arg -> interp_sign
+val set_current_late_arg : interp_sign -> late_arg -> interp_sign
 
-val populate_late_arg : Taccoerce.late_arg -> glob_tactic_expr -> unit Proofview.tactic
+val populate_late_arg : late_arg -> glob_tactic_expr -> unit Proofview.tactic
 
 val populate_current_late_arg : interp_sign -> glob_tactic_expr -> unit Proofview.tactic
 

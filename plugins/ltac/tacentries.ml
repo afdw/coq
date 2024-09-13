@@ -705,7 +705,7 @@ let lift_constr_tac_to_ml_tac ml vars tac =
             | Anonymous -> None
             | Name id -> Some id
           ) in
-        let arg_late_args = args |> List.map (fun _ -> Taccoerce.new_late_arg ()) in
+        let arg_late_args = args |> List.map (fun _ -> new_late_arg ()) in
         (List.combine args arg_late_args |> Proofview.Monad.List.iter (fun (arg, arg_late_arg) ->
           Tacinterp.populate_late_arg arg_late_arg (CAst.make (Tacexpr.TacArg (Tacexpr.Reference (Locus.ArgVar (CAst.make arg)))))
         )) <*>
