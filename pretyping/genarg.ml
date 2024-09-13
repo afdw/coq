@@ -235,3 +235,22 @@ let register_subst0 = Subst.register0
 
 let generic_substitute subs (GenArg (Glbwit wit, v)) =
   in_gen (glbwit wit) (substitute wit subs v)
+
+(** {5 Late args} *)
+
+type late_arg = int
+
+let late_arg_ctr = ref 0
+
+let new_late_arg () = incr late_arg_ctr; !late_arg_ctr
+
+module LateArgSet = Set.Make(Int)
+module LateArgMap = Map.Make(Int)
+
+let wit_late_arg : (late_arg * raw_generic_argument option, late_arg * glob_generic_argument option, Empty.t) genarg_type =
+  create_arg "late_arg"
+
+(** {5 Printed args} *)
+
+let wit_printed_arg : (Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg) genarg_type =
+  create_arg "printed_arg"

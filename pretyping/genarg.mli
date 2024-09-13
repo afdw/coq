@@ -220,3 +220,18 @@ val wit_list : ('a, 'b, 'c) genarg_type -> ('a list, 'b list, 'c list) genarg_ty
 val wit_opt : ('a, 'b, 'c) genarg_type -> ('a option, 'b option, 'c option) genarg_type
 val wit_pair : ('a1, 'b1, 'c1) genarg_type -> ('a2, 'b2, 'c2) genarg_type ->
   ('a1 * 'a2, 'b1 * 'b2, 'c1 * 'c2) genarg_type
+
+(** {5 Late args} *)
+
+type late_arg
+
+val new_late_arg : unit -> late_arg
+
+module LateArgSet : CSet.S with type elt = late_arg
+module LateArgMap : CMap.ExtS with type key = late_arg and module Set := LateArgSet
+
+val wit_late_arg : (late_arg * raw_generic_argument option, late_arg * glob_generic_argument option, Util.Empty.t) genarg_type
+
+(** {5 Printed args} *)
+
+val wit_printed_arg : (Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg, Proofview_monad.Info.lazy_msg) genarg_type
