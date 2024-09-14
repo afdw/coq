@@ -25,6 +25,8 @@ open Ltac_pretype
     implementation features various styles and stages of the proof engine.
     This has to be uniformized someday. *)
 
+val tag_delayed_open : (unit Proofview.tactic -> unit Proofview.tactic) ref
+
 (** {6 General functions. } *)
 
 val is_quantified_hypothesis : Id.t -> Proofview.Goal.t -> bool
@@ -112,7 +114,7 @@ val onInductionArg :
     constr with_bindings destruction_arg -> unit Proofview.tactic
 
 val force_destruction_arg : evars_flag -> env -> evar_map ->
-    delayed_open_constr_with_bindings destruction_arg ->
+    named_delayed_open_constr_with_bindings destruction_arg ->
     evar_map * constr with_bindings destruction_arg
 
 val finish_evar_resolution : ?flags:Pretyping.inference_flags ->
@@ -129,7 +131,7 @@ val intro_patterns_to : evars_flag -> Id.t Logic.move_location -> intro_patterns
   unit Proofview.tactic
 val intro_patterns_bound_to : evars_flag -> int -> Id.t Logic.move_location -> intro_patterns ->
   unit Proofview.tactic
-val intro_pattern_to : evars_flag -> Id.t Logic.move_location -> delayed_open_constr intro_pattern_expr ->
+val intro_pattern_to : evars_flag -> Id.t Logic.move_location -> named_delayed_open_constr intro_pattern_expr ->
   unit Proofview.tactic
 
 (** Implements user-level "intros", with [] standing for "**" *)

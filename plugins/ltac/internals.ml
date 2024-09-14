@@ -52,7 +52,7 @@ let with_delayed_uconstr ist c tac =
     patvars_abstract = false;
  } in
   let c = Tacinterp.type_uconstr ~flags ist c in
-  Tacticals.tclDELAYEDWITHHOLES false c tac
+  Tacticals.tclDELAYEDWITHHOLES false (Tacmach.apply_named_delayed_open c) tac
 
 let replace_in_clause_maybe_by ist c1 c2 cl tac =
   with_delayed_uconstr ist c1
@@ -100,7 +100,7 @@ let refine_tac ist ~simple ~with_classes c =
     let expected_type = Pretyping.OfType concl in
     let c = Tacinterp.type_uconstr ~flags ~expected_type ist c in
     let update = begin fun sigma ->
-      c env sigma
+      Tacmach.apply_named_delayed_open c env sigma
     end in
     let refine = Refine.refine ~typecheck:false update in
     if simple then refine
@@ -277,7 +277,7 @@ let tclOPTIMIZE_HEAP =
 
 let onSomeWithHoles tac = function
   | None -> tac None
-  | Some c -> Tacticals.tclDELAYEDWITHHOLES false c (fun c -> tac (Some c))
+  | Some c -> Tacticals.tclDELAYEDWITHHOLES false (Tacmach.apply_named_delayed_open c) (fun c -> tac (Some c))
 
 let decompose l c =
   Proofview.Goal.enter begin fun gl ->
@@ -294,7 +294,7 @@ let exact ist (c : Ltac_pretype.closed_glob_constr) =
   let open Tacmach in
   Proofview.Goal.enter begin fun gl ->
   let expected_type = Pretyping.OfType (pf_concl gl) in
-  let sigma, c = Tacinterp.type_uconstr ~expected_type ist c (pf_env gl) (project gl) in
+  let sigma, c = Tacmach.apply_named_delayed_open (Tacinterp.type_uconstr ~expected_type ist c) (pf_env gl) (project gl) in
   Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma) (Tactics.exact_no_check c)
   end
 

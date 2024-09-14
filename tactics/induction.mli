@@ -74,7 +74,7 @@ val destruct : evars_flag -> clear_flag -> constr -> or_and_intro_pattern option
 (** Implements user-level "destruct" and "induction" *)
 
 val induction_destruct : rec_flag -> evars_flag ->
-  (delayed_open_constr_with_bindings Tactics.destruction_arg
+  (named_delayed_open_constr_with_bindings Tactics.destruction_arg
    * (intro_pattern_naming option * or_and_intro_pattern option)
    * clause option) list *
   constr with_bindings option -> unit Proofview.tactic

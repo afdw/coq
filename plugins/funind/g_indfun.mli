@@ -11,7 +11,7 @@
 val wit_fun_ind_using :
   (Constrexpr.constr_expr Tactypes.with_bindings option,
    Genintern.glob_constr_and_expr Tactypes.with_bindings option,
-   EConstr.constr Tactypes.with_bindings Tactypes.delayed_open option)
+   EConstr.constr Tactypes.with_bindings Tactypes.named_delayed_open option)
   Genarg.genarg_type
 
 val fun_ind_using :

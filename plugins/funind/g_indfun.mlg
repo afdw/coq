@@ -47,8 +47,9 @@ let pr_fun_ind_using_typed prc prlc _ opt_c =
     | Some b ->
       let env = Global.env () in
       let evd = Evd.from_env env in
-      let (_, b) = b env evd in
-      spc () ++ hov 2 (str "using" ++ spc () ++ Miscprint.pr_with_bindings (prc env evd) (prlc env evd) b)
+      Pptactic.pr_named_delayed_open (fun env sigma b ->
+        spc () ++ hov 2 (str "using" ++ spc () ++ Miscprint.pr_with_bindings (prc env sigma) (prlc env sigma) b)
+      ) env evd b
 
 }
 
@@ -84,7 +85,7 @@ let out_disjunctive = CAst.map (function
 }
 
 ARGUMENT EXTEND with_names TYPED AS intro_pattern option
-  PRINTED BY { fun prc _ _ -> pr_intro_as_pat (fun c -> prc env sigma @@ snd @@ c env sigma) }
+  PRINTED BY { fun prc _ _ -> pr_intro_as_pat (Pptactic.pr_named_delayed_open prc env sigma) }
   RAW_PRINTED BY { fun prc _ _ -> pr_intro_as_pat (prc env sigma) }
   GLOB_PRINTED BY { fun prc _ _ -> pr_intro_as_pat (prc env sigma) }
 | [ "as"  simple_intropattern(ipat) ] -> { Some ipat }

@@ -371,7 +371,7 @@ let ensure_freshness env =
 
 (* Raise Not_found if not in interpretation sign *)
 let try_interp_ltac_var coerce ist env {loc;v=id} =
-  let v = Id.Map.find id ist.lfun in
+  let v = Id.Map.find id ist.lfun |> clone in
   try coerce v with CannotCoerceTo s ->
     Taccoerce.error_ltac_variable ?loc id env v s
 
@@ -886,9 +886,10 @@ and interp_intro_pattern_action ist env sigma = function
       let l = interp_intro_pattern_list_as_list ist env sigma l in
       IntroInjection l
   | IntroApplyOn ({loc;v=c},ipat) ->
+      let default = GenArg (Glbwit wit_constr, c) in
       let c env sigma = interp_open_constr ist env sigma c in
       let ipat = interp_intro_pattern ist env sigma ipat in
-      IntroApplyOn (CAst.make ?loc c,ipat)
+      IntroApplyOn (CAst.make ?loc (prepare_named_delayed_open wit_dconstr ~default c),ipat)
   | IntroWildcard | IntroRewrite _ as x -> x
 
 and interp_or_and_intro_pattern ist env sigma = function
@@ -901,7 +902,7 @@ and interp_or_and_intro_pattern ist env sigma = function
 
 and interp_intro_pattern_list_as_list ist env sigma = function
   | [{loc;v=IntroNaming (IntroIdentifier id)}] as l ->
-      (try coerce_to_intro_pattern_list ?loc sigma (Id.Map.find id ist.lfun)
+      (try coerce_to_intro_pattern_list ?loc sigma (Id.Map.find id ist.lfun |> clone)
        with Not_found | CannotCoerceTo _ ->
          List.map (interp_intro_pattern ist env sigma) l)
   | l -> List.map (interp_intro_pattern ist env sigma) l
@@ -984,11 +985,12 @@ let interp_open_constr_with_bindings_loc ist ((c,_),bl as cb) =
   (loc,f)
 
 let interp_destruction_arg ist gl arg =
+  let default = GenArg (Glbwit wit_destruction_arg, arg) in
   match arg with
   | keep,ElimOnConstr c ->
-      keep,ElimOnConstr begin fun env sigma ->
+      keep,ElimOnConstr (prepare_named_delayed_open wit_open_constr_with_bindings ~default begin fun env sigma ->
         interp_open_constr_with_bindings ist env sigma c
-      end
+      end)
   | keep,ElimOnAnonHyp n as x -> x
   | keep,ElimOnIdent {loc;v=id} ->
       let error () = user_err ?loc
@@ -999,12 +1001,12 @@ let interp_destruction_arg ist gl arg =
         if Tactics.is_quantified_hypothesis id' gl
         then keep,ElimOnIdent (CAst.make ?loc id')
         else
-          (keep, ElimOnConstr begin fun env sigma ->
+          (keep, ElimOnConstr (prepare_named_delayed_open wit_open_constr_with_bindings ~default begin fun env sigma ->
           try (sigma, (constr_of_id env id', NoBindings))
           with Not_found ->
             user_err ?loc  (
             Id.print id ++ strbrk " binds to " ++ Id.print id' ++ strbrk " which is neither a declared nor a quantified hypothesis.")
-          end)
+          end))
       in
       try
         (* FIXME: should be moved to taccoerce *)
@@ -1021,7 +1023,7 @@ let interp_destruction_arg ist gl arg =
           keep,ElimOnAnonHyp (out_gen (topwit wit_int) v)
         else match Value.to_constr v with
         | None -> error ()
-        | Some c -> keep,ElimOnConstr (fun env sigma -> (sigma, (c,NoBindings)))
+        | Some c -> keep,ElimOnConstr (Either.Right (c, NoBindings))
       with Not_found ->
         (* We were in non strict (interactive) mode *)
         if Tactics.is_quantified_hypothesis id gl then
@@ -1032,7 +1034,7 @@ let interp_destruction_arg ist gl arg =
             let (sigma,c) = interp_open_constr ist env sigma c in
             (sigma, (c,NoBindings))
           in
-          keep,ElimOnConstr f
+          keep,ElimOnConstr (prepare_named_delayed_open wit_open_constr_with_bindings ~default f)
 
 (* Associates variables with values and gives the remaining variables and
    values *)
@@ -1090,11 +1092,12 @@ let rec read_match_rule lfun ist env sigma = function
 let type_uconstr ?(flags = (constr_flags ()))
   ?(expected_type = WithoutTypeConstraint) ist c =
   let flags = { flags with polymorphic = ist.Geninterp.poly } in
-  begin fun env sigma ->
+  let default = GenArg (Glbwit wit_value, in_gen (topwit wit_uconstr) c) in
+  prepare_named_delayed_open wit_dconstr ~default @@ begin fun env sigma ->
     Pretyping.understand_uconstr ~flags ~expected_type env sigma c
   end
 
-let tag_print ist k t =
+let tag_print_gen lfun k t =
   Proofview.tclENV >>= fun env ->
   Proofview.tclEVARMAP >>= fun sigma ->
   Proofview.Trace.tag_tactic
@@ -1102,10 +1105,29 @@ let tag_print ist k t =
     (fun () ->
       Pputils.pr_glb_generic env sigma None (GenArg (
         Glbwit wit_tacvalue,
-        VFun (UnnamedAppl, extract_trace ist, None, ist.lfun, [], glob_late_arg_tac print_late_arg)
+        VFun (UnnamedAppl, ([], []), None, lfun, [], glob_late_arg_tac print_late_arg)
       ))
     )
     t
+
+let f_last_lfun : value Id.Map.t Evd.Store.field = Evd.Store.field "last_lfun"
+
+let tag_print ist k t =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let store = Evd.Store.set store f_last_lfun ist.lfun in
+  let sigma = Evd.set_extra_data store sigma in
+  Proofview.Unsafe.tclEVARS sigma <*>
+  tag_print_gen ist.lfun k t
+
+let tag_print_no_ist k t =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let lfun = Evd.Store.get store f_last_lfun |> Option.default Id.Map.empty in
+  tag_print_gen lfun k t
+
+let tag_delayed_open t = tag_print_no_ist (Proofview_monad.Info.Builtin (Pp.str "delayed_open")) t
+let () = Tactics.tag_delayed_open := tag_delayed_open
 
 (* Interprets an l-tac expression into a value *)
 let rec val_interp_ftactic deferred_id ist ?(appl = UnnamedAppl) (tac : glob_tactic_expr) : TaggedVal.t Ftactic.t =
@@ -1362,7 +1384,7 @@ and interp_ltac_reference_ftactic ?loc' mustbetac deferred_id ist r : TaggedVal.
       let (>>=) = Ftactic.bind in
       Proofview.Trace.tag_deferred_contents deferred_id (
         let v =
-          ist.lfun |> Id.Map.find_opt id |> Option.default (in_gen (topwit wit_hyp) id) in
+          ist.lfun |> Id.Map.find_opt id |> Option.map clone |> Option.default (in_gen (topwit wit_hyp) id) in
         populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, Genarg.in_gen (glbwit wit_value) v)))) <*>
         tag_print ist (Proofview_monad.Info.Builtin (Pp.str "ArgVar")) (
           Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
@@ -1468,7 +1490,7 @@ and interp_tacarg_ftactic deferred_id ist arg : TaggedVal.t Ftactic.t =
         let sigma = Proofview.Goal.sigma gl in
         let env = Proofview.Goal.env gl in
         let c_interp = interp_uconstr ist env sigma c in
-        let (sigma, c_interp) = type_uconstr ist c_interp env sigma in
+        let (sigma, c_interp) = apply_named_delayed_open (type_uconstr ist c_interp) env sigma in
         Proofview.Unsafe.tclEVARS sigma <*>
         let c_interp_glob = Detyping.detype Detyping.Now Id.Set.empty env sigma c_interp, None in
         populate_current_late_arg ist (CAst.make (TacArg (ConstrMayEval (ConstrTerm c_interp_glob)))) <*>
@@ -1931,12 +1953,14 @@ and interp_atomic ist tac : unit Proofview.tactic =
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
         let l = List.map (fun (k,c) ->
+          let default = GenArg (Glbwit wit_constr_with_bindings, c) in
           let loc, f = interp_open_constr_with_bindings_loc ist c in
-            (k,(CAst.make ?loc f))) cb
+            (k,(CAst.make ?loc (prepare_named_delayed_open wit_open_constr_with_bindings ~default f)))) cb
         in
         let cl = List.map (interp_in_hyp_as ist env sigma) cl in
         populate_current_late_arg_atomic ist (TacApply (a, ev, l |> List.map (fun (k, c) -> (k, c.v)), cl)) <*>
         tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacApply")) @@
+          let l = l |> List.map (fun (k, c) -> (k, c |> CAst.map apply_named_delayed_open)) in
           let tac = match cl with
             | [] -> Tactics.apply_with_delayed_bindings_gen a ev l
             | cl ->
@@ -2113,6 +2137,7 @@ and interp_atomic ist tac : unit Proofview.tactic =
           | AtLeastOneOccurrence | AllOccurrences | NoOccurrences -> true
           | _ -> false
         in
+        let default = GenArg (Glbwit wit_constr, c) in
         let c_interp patvars env sigma =
           let lfun' = Id.Map.fold (fun id c lfun ->
             Id.Map.add id (Value.of_constr c) lfun)
@@ -2123,9 +2148,11 @@ and interp_atomic ist tac : unit Proofview.tactic =
             then interp_type ist env sigma c
             else interp_constr ist env sigma c
         in
+        let c_interp = prepare_named_delayed_open_1 wit_dconstr ~default c_interp in
         let cl = interp_clause ist (pf_env gl) (project gl) cl in
         populate_current_late_arg_atomic ist (TacChange (check, None, c_interp Id.Map.empty, cl)) <*>
         tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacChange")) @@
+          let c_interp patvars = apply_named_delayed_open (c_interp patvars) in
           Tactics.change ~check None c_interp cl
       end
   | TacChange (check,Some op,c,cl) ->
@@ -2134,6 +2161,7 @@ and interp_atomic ist tac : unit Proofview.tactic =
         let sigma = project gl in
         let op = interp_typed_pattern ist env sigma op in
         let to_catch = function Not_found -> true | e -> CErrors.is_anomaly e in
+        let default = GenArg (Glbwit wit_constr, c) in
         let c_interp patvars env sigma =
           let lfun' = Id.Map.fold (fun id c lfun ->
             Id.Map.add id (Value.of_constr c) lfun)
@@ -2146,9 +2174,11 @@ and interp_atomic ist tac : unit Proofview.tactic =
             with e when to_catch e (* Hack *) ->
               user_err  (strbrk "Failed to get enough information from the left-hand side to type the right-hand side.")
         in
+        let c_interp = prepare_named_delayed_open_1 wit_dconstr ~default c_interp in
         let cl = interp_clause ist env sigma cl in
         populate_current_late_arg_atomic ist (TacChange (check, Some op, c_interp Id.Map.empty, cl)) <*>
         tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacChange")) @@
+          let c_interp patvars = apply_named_delayed_open (c_interp patvars) in
           Tactics.change ~check (Some op) c_interp cl
       end
 
@@ -2157,15 +2187,17 @@ and interp_atomic ist tac : unit Proofview.tactic =
   | TacRewrite (ev,l,cl,by) ->
       Proofview.Goal.enter begin fun gl ->
         let l' = List.map (fun (b,m,(keep,c)) ->
+          let default = GenArg (Glbwit wit_constr_with_bindings, c) in
           let f env sigma =
             interp_open_constr_with_bindings ist env sigma c
           in
-          (b,m,keep,f)) l in
+          (b,m,keep,prepare_named_delayed_open wit_open_constr_with_bindings ~default f)) l in
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
         let cl = interp_clause ist env sigma cl in
         populate_current_late_arg_atomic ist (TacRewrite (ev, l' |> List.map (fun (b, m, keep, f) -> (b, m, (keep, f))), cl, by)) <*>
         tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacRewrite")) @@
+          let l' = l' |> List.map (fun (b, m, keep, f) -> (b, m, keep, apply_named_delayed_open f)) in
           Equality.general_multi_rewrite ev l' cl
             (Option.map (fun by -> Tacticals.tclCOMPLETE (interp_tactic ist by), Equality.Naive) by)
       end
@@ -2380,8 +2412,10 @@ let lifts wit f = (); fun deferred_id ist x ->
 
 let interp_bindings' deferred_id ist bl =
   Proofview.Trace.tag_deferred_contents deferred_id (
-    let v env sigma =
+    let default = GenArg (Glbwit wit_bindings, bl) in
+    let f env sigma =
       interp_bindings ist env sigma bl in
+    let v = prepare_named_delayed_open wit_bindings ~default f in
     populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, GenArg (glbwit wit_value, Taccoerce.in_gen (topwit wit_bindings) v))))) <*>
     tag_print ist (Proofview_monad.Info.Builtin (Pp.str "bindings")) (
       Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
@@ -2391,8 +2425,10 @@ let interp_bindings' deferred_id ist bl =
 
 let interp_constr_with_bindings' deferred_id ist c =
   Proofview.Trace.tag_deferred_contents deferred_id (
-    let v env sigma =
+    let default = GenArg (Glbwit wit_constr_with_bindings, c) in
+    let f env sigma =
       interp_constr_with_bindings ist env sigma c in
+    let v = prepare_named_delayed_open wit_constr_with_bindings ~default f in
     populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, GenArg (glbwit wit_value, Taccoerce.in_gen (topwit wit_constr_with_bindings) v))))) <*>
     tag_print ist (Proofview_monad.Info.Builtin (Pp.str "constr_with_bindings")) (
       Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
@@ -2402,8 +2438,10 @@ let interp_constr_with_bindings' deferred_id ist c =
 
 let interp_open_constr_with_bindings' deferred_id ist c =
   Proofview.Trace.tag_deferred_contents deferred_id (
-    let v env sigma =
+    let default = GenArg (Glbwit wit_open_constr_with_bindings, c) in
+    let f env sigma =
       interp_open_constr_with_bindings ist env sigma c in
+    let v = prepare_named_delayed_open wit_open_constr_with_bindings ~default f in
     populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, GenArg (glbwit wit_value, Taccoerce.in_gen (topwit wit_open_constr_with_bindings) v))))) <*>
     tag_print ist (Proofview_monad.Info.Builtin (Pp.str "open_constr_with_bindings")) (
       Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->

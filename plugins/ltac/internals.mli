@@ -24,7 +24,7 @@ val mytclWithHoles : (Tactics.evars_flag ->
   EConstr.constr Tactypes.with_bindings Tactics.destruction_arg option ->
     unit Proofview.tactic) ->
   Tactics.evars_flag ->
-  Tactypes.delayed_open_constr_with_bindings Tactics.destruction_arg ->
+  Tactypes.named_delayed_open_constr_with_bindings Tactics.destruction_arg ->
   unit Proofview.tactic
 
 val with_delayed_uconstr : Tacinterp.interp_sign ->
@@ -61,7 +61,7 @@ val decompose : EConstr.t list -> EConstr.t -> unit tactic
 
 val tclOPTIMIZE_HEAP : unit tactic
 
-val onSomeWithHoles : ('a option -> unit tactic) -> 'a Tactypes.delayed_open option -> unit tactic
+val onSomeWithHoles : ('a option -> unit tactic) -> 'a Tactypes.named_delayed_open option -> unit tactic
 
 val exact : Geninterp.interp_sign -> Ltac_pretype.closed_glob_constr -> unit Proofview.tactic
 

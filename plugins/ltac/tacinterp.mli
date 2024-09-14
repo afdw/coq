@@ -57,6 +57,7 @@ val populate_late_arg : late_arg -> glob_tactic_expr -> unit Proofview.tactic
 val populate_current_late_arg : interp_sign -> glob_tactic_expr -> unit Proofview.tactic
 
 val tag_print : interp_sign -> Proofview_monad.Info.tactic_kind -> 'a Proofview.tactic -> 'a Proofview.tactic
+val tag_delayed_open : 'a Proofview.tactic -> 'a Proofview.tactic
 
 val extract_ltac_constr_values : interp_sign -> Environ.env ->
   Ltac_pretype.constr_under_binders Id.Map.t
@@ -72,7 +73,7 @@ val get_debug : unit -> debug_info
 val type_uconstr :
   ?flags:Pretyping.inference_flags ->
   ?expected_type:Pretyping.typing_constraint ->
-  Geninterp.interp_sign -> Ltac_pretype.closed_glob_constr -> constr Tactypes.delayed_open
+  Geninterp.interp_sign -> Ltac_pretype.closed_glob_constr -> constr Tactypes.named_delayed_open
 
 (** Adds an interpretation function for extra generic arguments *)
 

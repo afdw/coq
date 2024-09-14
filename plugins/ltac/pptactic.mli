@@ -174,6 +174,13 @@ exception ContextRequired
 
 val pr_value : ?context:(env * Evd.evar_map) -> entry_relative_level -> Val.t -> Pp.t
 
+val pr_named_delayed_open :
+  (Environ.env -> Evd.evar_map -> 'a -> Pp.t) ->
+  Environ.env ->
+  Evd.evar_map ->
+  'a named_delayed_open ->
+  Pp.t
+
 val pp_ltac_call_kind : ltac_call_kind -> Pp.t
 
 val ltop : entry_relative_level

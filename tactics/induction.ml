@@ -143,7 +143,7 @@ let tactic_infer_flags with_evar = Pretyping.{
 
 let onOpenInductionArg env sigma tac = function
   | clear_flag,ElimOnConstr f ->
-      let (sigma', cbl) = f env sigma in
+      let (sigma', cbl) = Tacmach.apply_named_delayed_open f env sigma in
       Tacticals.tclTHEN
         (Proofview.Unsafe.tclEVARS sigma')
         (tac clear_flag (Some sigma,cbl))
@@ -320,7 +320,7 @@ let warn_unused_intro_pattern =
        strbrk"Unused introduction " ++ str (String.plural (List.length names) "pattern") ++
        str": " ++ prlist_with_sep spc
          (Miscprint.pr_intro_pattern
-            (fun c -> Printer.pr_econstr_env env sigma (snd (c env sigma)))) names)
+            (fun c -> Printer.pr_econstr_env env sigma (snd (Tacmach.apply_named_delayed_open c env sigma)))) names)
 
 let check_unused_names env sigma names =
   if not (List.is_empty names) then

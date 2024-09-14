@@ -53,3 +53,5 @@ val pf_whd_compute : Proofview.Goal.t -> constr -> constr
 val pf_nf_evar : Proofview.Goal.t -> constr -> constr
 
 val pr_gls : Proofview.Goal.t -> Pp.t
+
+val apply_named_delayed_open : 'a Tactypes.named_delayed_open -> 'a Tactypes.delayed_open
