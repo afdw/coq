@@ -94,9 +94,9 @@ type ml_tactic_entry = {
 type open_constr_expr = unit * constr_expr
 type open_glob_constr = unit * Genintern.glob_constr_and_expr
 
-type intro_pattern = delayed_open_constr intro_pattern_expr CAst.t
-type intro_patterns = delayed_open_constr intro_pattern_expr CAst.t list
-type or_and_intro_pattern = delayed_open_constr or_and_intro_pattern_expr CAst.t
+type intro_pattern = named_delayed_open_constr intro_pattern_expr CAst.t
+type intro_patterns = named_delayed_open_constr intro_pattern_expr CAst.t list
+type or_and_intro_pattern = named_delayed_open_constr or_and_intro_pattern_expr CAst.t
 type intro_pattern_naming = Namegen.intro_pattern_naming_expr CAst.t
 
 (** Generic expressions for atomic tactics *)
@@ -349,8 +349,8 @@ type raw_tactic_arg =
 (** Interpreted tactics *)
 
 type t_trm = EConstr.constr
-type t_dtrm = delayed_open_constr
-type t_dtrm_with_bindings = delayed_open_constr_with_bindings
+type t_dtrm = named_delayed_open_constr
+type t_dtrm_with_bindings = named_delayed_open_constr_with_bindings
 type t_pat = constr_pattern
 type t_cst = Evaluable.t
 type t_ref = ltac_constant located

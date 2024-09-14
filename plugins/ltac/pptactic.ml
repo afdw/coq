@@ -1224,15 +1224,21 @@ let pr_goal_selector ~toplevel s =
         | _ -> user_err Pp.(str "Cannot translate fix tactic: not enough products") in
     strip_ty [] n ty
 
+  let pr_named_delayed_open f env sigma named_delayed_open =
+    match named_delayed_open with
+    | Either.Left ((late_arg, default), _) ->
+      Pputils.pr_glb_generic env sigma None (in_gen (Glbwit wit_late_arg) (late_arg, Some (default |> Option.default (in_gen (Glbwit wit_printed_arg) (fun () -> Pp.str "<?>")))))
+    | Either.Right a -> f env sigma a
+
   let pr_atomic_tactic_level env sigma t =
     let prtac (t:atomic_tactic_expr) =
       let pr = {
         pr_tactic = pr_glob_tactic_level env sigma;
         pr_constr = pr_econstr_env;
-        pr_dconstr = (fun env sigma c -> let (sigma, c) = c env sigma in pr_econstr_env env sigma c);
+        pr_dconstr = pr_named_delayed_open pr_econstr_env;
         pr_lconstr = pr_leconstr_env;
         pr_constr_with_bindings = (fun env sigma -> pr_with_bindings (pr_econstr_env env sigma) (pr_leconstr_env env sigma));
-        pr_dconstr_with_bindings = (fun env sigma c -> let (sigma, c) = c env sigma in pr_with_bindings (pr_econstr_env env sigma) (pr_leconstr_env env sigma) c);
+        pr_dconstr_with_bindings = pr_named_delayed_open (fun env sigma -> pr_with_bindings (pr_econstr_env env sigma) (pr_leconstr_env env sigma));
         pr_red_pattern = pr_constr_pattern_env;
         pr_pattern = pr_constr_pattern_env;
         pr_lpattern = pr_lconstr_pattern_env;
@@ -1351,7 +1357,7 @@ let declare_extra_vernac_genarg_pprule wit f =
 (** Registering *)
 
 let pr_intro_pattern_env p = Genprint.TopPrinterNeedsContext (fun env sigma ->
-  let print_constr c = let (sigma, c) = c env sigma in pr_econstr_env env sigma c in
+  let print_constr = pr_named_delayed_open pr_econstr_env env sigma in
   Miscprint.pr_intro_pattern print_constr p)
 
 let pr_red_expr_env r = Genprint.TopPrinterNeedsContext (fun env sigma ->
@@ -1360,22 +1366,21 @@ let pr_red_expr_env r = Genprint.TopPrinterNeedsContext (fun env sigma ->
                          int) r)
 
 let pr_bindings_env bl = Genprint.TopPrinterNeedsContext (fun env sigma ->
-  let sigma, bl = bl env sigma in
-  Miscprint.pr_bindings
-    (pr_econstr_env env sigma) (pr_leconstr_env env sigma) bl)
+  pr_named_delayed_open (fun env sigma -> Miscprint.pr_bindings_no_with
+  (pr_econstr_env env sigma) (pr_leconstr_env env sigma)) env sigma bl)
 
 let pr_with_bindings_env bl = Genprint.TopPrinterNeedsContext (fun env sigma ->
-  let sigma, bl = bl env sigma in
-  pr_with_bindings
-    (pr_econstr_env env sigma) (pr_leconstr_env env sigma) bl)
+  pr_named_delayed_open (fun env sigma -> pr_with_bindings
+  (pr_econstr_env env sigma) (pr_leconstr_env env sigma)) env sigma bl)
 
 let pr_destruction_arg_env c = Genprint.TopPrinterNeedsContext (fun env sigma ->
-  let sigma, c = match c with
-  | clear_flag,ElimOnConstr g -> let sigma,c = g env sigma in sigma,(clear_flag,ElimOnConstr c)
-  | clear_flag,ElimOnAnonHyp n as x -> sigma, x
-  | clear_flag,ElimOnIdent id as x -> sigma, x in
+  let c = match c with
+  | clear_flag,ElimOnConstr g -> clear_flag,ElimOnConstr (pr_named_delayed_open (fun env sigma -> pr_with_bindings (pr_econstr_env env sigma) (pr_leconstr_env env sigma)) env sigma g)
+  | clear_flag,ElimOnAnonHyp n as x -> x
+  | clear_flag,ElimOnIdent id as x -> x in
   pr_destruction_arg
-    (pr_with_bindings (pr_econstr_env env sigma) (pr_leconstr_env env sigma)) c)
+    Fun.id c)
+
 
 let make_constr_printer f c =
   Genprint.TopPrinterNeedsContextAndLevel {
@@ -1475,6 +1480,11 @@ let () =
     (lift_env (fun env sigma -> pr_destruction_arg (pr_with_bindings (pr_and_constr_expr @@ pr_glob_constr_pptac env sigma)
                   (pr_and_constr_expr @@ pr_lglob_constr_pptac env sigma))))
     pr_destruction_arg_env
+  ;
+  register_print0 Tacarg.wit_dconstr
+    (lift_env pr_constr_expr)
+    (lift_env (fun env sigma -> pr_and_constr_expr @@ pr_glob_constr_pptac env sigma))
+    (fun a -> Genprint.TopPrinterNeedsContext (fun env sigma -> pr_named_delayed_open (fun env sigma -> pr_econstr_env env sigma) env sigma a))
   ;
   register_basic_print0 Stdarg.wit_int int int int;
   register_basic_print0 Stdarg.wit_bool pr_bool pr_bool pr_bool;

@@ -539,6 +539,7 @@ let apply_special_clear_request clear_flag f =
     let env = Proofview.Goal.env gl in
     try
       let (sigma, (c, bl)) = f env sigma in
+      !tag_delayed_open @@
       let c = try Some (destVar sigma c) with DestKO -> None in
       apply_clear_request clear_flag (use_clear_hyp_by_default ()) c
     with

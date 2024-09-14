@@ -66,7 +66,7 @@ and mk_intro_pattern_action = function
 | IntroOrAndPattern ipat -> Tactypes.IntroOrAndPattern (mk_or_and_intro_pattern ipat)
 | IntroInjection ipats -> Tactypes.IntroInjection (List.map mk_intro_pattern ipats)
 | IntroApplyOn (c, ipat) ->
-  let c = CAst.make @@ delayed_of_thunk Tac2ffi.constr c in
+  let c = CAst.make @@ Either.Left ((Genarg.new_late_arg (), None), fun _ -> delayed_of_thunk Tac2ffi.constr c) in
   Tactypes.IntroApplyOn (c, mk_intro_pattern ipat)
 | IntroRewrite b -> Tactypes.IntroRewrite b
 
@@ -115,7 +115,7 @@ let apply adv ev cb cl =
 let mk_destruction_arg = function
 | ElimOnConstr c ->
   let c = c >>= fun c -> return (mk_with_bindings c) in
-  Tactics.ElimOnConstr (delayed_of_tactic c)
+  Tactics.ElimOnConstr (Either.Left ((Genarg.new_late_arg (), None), fun _ -> delayed_of_tactic c))
 | ElimOnIdent id -> Tactics.ElimOnIdent CAst.(make id)
 | ElimOnAnonHyp n -> Tactics.ElimOnAnonHyp n
 

@@ -44,11 +44,14 @@ type 'a bindings =
 type 'a with_bindings = 'a * 'a bindings
 
 type 'a delayed_open = Environ.env -> Evd.evar_map -> Evd.evar_map * 'a
+type 'a named_delayed_open = ((Genarg.late_arg * Genarg.glob_generic_argument option) * (Genarg.late_arg -> 'a delayed_open), 'a) Either.t
 
 type delayed_open_constr = EConstr.constr delayed_open
 type delayed_open_constr_with_bindings = EConstr.constr with_bindings delayed_open
+type named_delayed_open_constr = EConstr.constr named_delayed_open
+type named_delayed_open_constr_with_bindings = EConstr.constr with_bindings named_delayed_open
 
-type intro_pattern = delayed_open_constr intro_pattern_expr CAst.t
-type intro_patterns = delayed_open_constr intro_pattern_expr CAst.t list
-type or_and_intro_pattern = delayed_open_constr or_and_intro_pattern_expr CAst.t
+type intro_pattern = named_delayed_open_constr intro_pattern_expr CAst.t
+type intro_patterns = named_delayed_open_constr intro_pattern_expr CAst.t list
+type or_and_intro_pattern = named_delayed_open_constr or_and_intro_pattern_expr CAst.t
 type intro_pattern_naming = Namegen.intro_pattern_naming_expr CAst.t

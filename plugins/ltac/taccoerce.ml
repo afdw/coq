@@ -642,6 +642,20 @@ let wrap_keep_late_args t =
   Proofview.Unsafe.tclEVARS sigma <*>
   Proofview.tclUNIT r
 
+let set_glob_late_arg sigma late_arg v =
+  let store = Evd.get_extra_data sigma in
+  let late_args_map = Evd.Store.get store f_late_args_map |> Option.default (LateArgMap.empty, LateArgMap.empty) in
+  let late_args_map = (
+    fst late_args_map,
+    (match v with
+    | None -> snd late_args_map |> LateArgMap.remove late_arg
+    | Some v -> snd late_args_map |> LateArgMap.add late_arg v)
+  ) in
+  let store = Evd.Store.set store f_late_args_map late_args_map in
+  let sigma = Evd.set_extra_data store sigma in
+  (* Printf.eprintf "!! %d %d\n" (Obj.magic late_arg) (snd late_args_map |> LateArgMap.cardinal); *)
+  sigma
+
 let () =
   let () = register_val0 wit_late_arg None in
   Pptactic.declare_extra_genarg_pprule_with_level
@@ -665,6 +679,84 @@ let glob_late_arg_tac_arg ?isquot ?default late_arg =
 
 let glob_late_arg_tac ?isquot ?default late_arg =
   CAst.make (Tacexpr.TacArg (glob_late_arg_tac_arg ?isquot ?default late_arg))
+
+let prepare_named_delayed_open wit ?default delayed_open =
+  Either.Left (
+    (new_late_arg (), default),
+    fun late_arg env sigma ->
+      let (sigma, a) = delayed_open env sigma in
+      let sigma = set_glob_late_arg sigma late_arg (Some (GenArg (glbwit wit_value, in_gen (topwit wit) (Either.Right a)))) in
+      (sigma, a)
+  )
+
+let prepare_named_delayed_open_1 wit ?default delayed_open =
+  let late_arg = new_late_arg () in
+  fun x ->
+    Either.Left (
+      (late_arg, default),
+      fun late_arg env sigma ->
+        let (sigma, a) = delayed_open x env sigma in
+        let sigma = set_glob_late_arg sigma late_arg (Some (GenArg (glbwit wit_value, in_gen (topwit wit) (Either.Right a)))) in
+        (sigma, a)
+    )
+
+let clone_named_delayed_open named_delayed_open =
+  match named_delayed_open with
+  | Either.Left ((_, default), f) -> Either.Left ((new_late_arg (), default), f)
+  | Either.Right x -> Either.Right x
+
+let clone_destruction_arg = function
+  | clear, Tactics.ElimOnConstr c -> clear, Tactics.ElimOnConstr (clone_named_delayed_open c)
+  | clear, Tactics.ElimOnIdent n -> clear, Tactics.ElimOnIdent n
+  | clear, Tactics.ElimOnAnonHyp n -> clear, Tactics.ElimOnAnonHyp n
+
+let rec clone_intro_pattern x =
+  x |> CAst.map (function
+    | IntroAction p -> IntroAction (clone_intro_pattern_action p)
+    | IntroNaming _ | IntroForthcoming _ as x -> x
+  )
+
+and clone_intro_pattern_action = let open CAst in function
+  | IntroApplyOn ({loc; v = t},pat) ->
+    IntroApplyOn (make ?loc @@ clone_named_delayed_open t, clone_intro_pattern pat)
+  | IntroOrAndPattern l ->
+    IntroOrAndPattern (clone_intro_or_and_pattern l)
+  | IntroInjection l -> IntroInjection (List.map clone_intro_pattern l)
+  | IntroWildcard | IntroRewrite _ as x -> x
+
+and clone_intro_or_and_pattern = function
+  | IntroAndPattern l ->
+    IntroAndPattern (List.map (clone_intro_pattern) l)
+  | IntroOrPattern ll ->
+    IntroOrPattern (List.map (List.map (clone_intro_pattern)) ll)
+
+
+let rec clone val_ =
+  let Val.Dyn (typ, x) = val_ in
+  match Val.eq typ Val.typ_list with
+  | Some Refl -> Val.Dyn (typ, x |> List.map clone)
+  | None ->
+    match Val.eq typ Val.typ_opt with
+    | Some Refl -> Val.Dyn (typ, x |> Option.map clone)
+    | None ->
+      match Val.eq typ Val.typ_pair with
+      | Some Refl -> Val.Dyn (typ, (fst x |> clone, snd x |> clone))
+      | None ->
+        match prj (val_tag (Topwit wit_bindings)) val_ with
+        | Some y -> Val.Dyn (val_tag (Topwit wit_bindings), clone_named_delayed_open y)
+        | None ->
+          match prj (val_tag (Topwit wit_constr_with_bindings)) val_ with
+          | Some y -> Val.Dyn (val_tag (Topwit wit_constr_with_bindings), clone_named_delayed_open y)
+          | None ->
+            match prj (val_tag (Topwit wit_open_constr_with_bindings)) val_ with
+            | Some y -> Val.Dyn (val_tag (Topwit wit_open_constr_with_bindings), clone_named_delayed_open y)
+            | None ->
+              match prj (val_tag (Topwit wit_destruction_arg)) val_ with
+              | Some y -> Val.Dyn (val_tag (Topwit wit_destruction_arg), clone_destruction_arg y)
+              | None ->
+                match prj (val_tag (Topwit wit_intro_pattern)) val_ with
+                | Some y -> Val.Dyn (val_tag (Topwit wit_intro_pattern), clone_intro_pattern y)
+                | None -> val_
 
 let debug_deref = CDebug.create ~name:"deref" ()
 

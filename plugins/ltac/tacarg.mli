@@ -29,17 +29,17 @@ val wit_quant_hyp : quantified_hypothesis uniform_genarg_type
 val wit_constr_with_bindings :
   (constr_expr with_bindings,
   glob_constr_and_expr with_bindings,
-  constr with_bindings delayed_open) genarg_type
+  constr with_bindings named_delayed_open) genarg_type
 
 val wit_open_constr_with_bindings :
   (constr_expr with_bindings,
   glob_constr_and_expr with_bindings,
-  constr with_bindings delayed_open) genarg_type
+  constr with_bindings named_delayed_open) genarg_type
 
 val wit_bindings :
   (constr_expr bindings,
   glob_constr_and_expr bindings,
-  constr bindings delayed_open) genarg_type
+  constr bindings named_delayed_open) genarg_type
 
 val wit_quantified_hypothesis : quantified_hypothesis uniform_genarg_type
 
@@ -55,5 +55,6 @@ val wit_ltac : (raw_tactic_expr, glob_tactic_expr, unit) genarg_type
 val wit_destruction_arg :
   (constr_expr with_bindings Tactics.destruction_arg,
    glob_constr_and_expr with_bindings Tactics.destruction_arg,
-   delayed_open_constr_with_bindings Tactics.destruction_arg) genarg_type
+   named_delayed_open_constr_with_bindings Tactics.destruction_arg) genarg_type
 
+val wit_dconstr : (constr_expr, glob_constr_and_expr, constr named_delayed_open) genarg_type

@@ -60,8 +60,7 @@ let eval_uconstrs ist cs =
     undeclared_evars_patvars = false;
     patvars_abstract = false;
   } in
-  let map c env sigma = c env sigma in
-  List.map (fun c -> map (Tacinterp.type_uconstr ~flags ist c)) cs
+  List.map (fun c -> Tacmach.apply_named_delayed_open (Tacinterp.type_uconstr ~flags ist c)) cs
 
 let pr_auto_using_raw env sigma _ _ _  = Pptactic.pr_auto_using @@ Ppconstr.pr_constr_expr env sigma
 let pr_auto_using_glob env sigma _ _ _ = Pptactic.pr_auto_using (fun (c,_) ->

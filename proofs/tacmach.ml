@@ -104,3 +104,8 @@ let pr_gls gl =
                   str" "  ++ pc) ++ fnl ()
   in
   hov 0 (pr_evar_map (Some 2) env sigma ++ fnl () ++ g)
+
+let apply_named_delayed_open named_delayed_open =
+  match named_delayed_open with
+  | Either.Left ((late_arg, _), f) -> f late_arg
+  | Either.Right a -> fun _ sigma -> (sigma, a)

@@ -58,7 +58,7 @@ val coerce_var_to_ident : bool -> Environ.env -> Evd.evar_map -> Value.t -> Id.t
 
 val coerce_to_ident_not_fresh : Evd.evar_map -> Value.t -> Id.t
 
-val coerce_to_intro_pattern : Evd.evar_map -> Value.t -> delayed_open_constr intro_pattern_expr
+val coerce_to_intro_pattern : Evd.evar_map -> Value.t -> named_delayed_open_constr intro_pattern_expr
 
 val coerce_to_intro_pattern_naming :
   Evd.evar_map -> Value.t -> Namegen.intro_pattern_naming_expr
@@ -139,8 +139,15 @@ val wrap_populate_glob_late_arg : late_arg -> glob_generic_argument option -> 'a
 
 val wrap_keep_late_args : 'a Proofview.tactic -> 'a Proofview.tactic
 
+val set_glob_late_arg : Evd.evar_map -> late_arg -> glob_generic_argument option -> Evd.evar_map
+
+val prepare_named_delayed_open : ('a, 'b, 'c named_delayed_open) genarg_type -> ?default:Genarg.glob_generic_argument -> 'c delayed_open -> 'c named_delayed_open
+val prepare_named_delayed_open_1 : ('a, 'b, 'c named_delayed_open) genarg_type -> ?default:Genarg.glob_generic_argument -> ('x -> 'c delayed_open) -> 'x -> 'c named_delayed_open
+
 val glob_late_arg_tac_arg : ?isquot:string -> ?default:glob_generic_argument -> late_arg -> Tacexpr.glob_tactic_arg
 val glob_late_arg_tac : ?isquot:string -> ?default:glob_generic_argument -> late_arg -> Tacexpr.glob_tactic_expr
+
+val clone : Val.t -> Val.t
 
 (** {5 Printed args} *)
 

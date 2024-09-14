@@ -40,3 +40,6 @@ let wit_ltac = make0 ~dyn:(val_tag (topwit Stdarg.wit_unit)) "ltac"
 
 let wit_destruction_arg =
   make0 "destruction_arg"
+
+let wit_dconstr =
+  make0 "dconstr"

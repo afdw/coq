@@ -57,7 +57,7 @@ and to_intro_pattern_naming : Namegen.intro_pattern_naming_expr -> Tac2types.int
   | IntroFresh id -> IntroFresh id
   | IntroAnonymous -> IntroAnonymous
 
-and to_intro_pattern_action : Tactypes.delayed_open_constr Tactypes.intro_pattern_action_expr -> Tac2types.intro_pattern_action = function
+and to_intro_pattern_action : Tactypes.named_delayed_open_constr Tactypes.intro_pattern_action_expr -> Tac2types.intro_pattern_action = function
   | IntroWildcard -> IntroWildcard
   | IntroOrAndPattern op -> IntroOrAndPattern (to_or_and_intro_pattern op)
   | IntroInjection inj -> IntroInjection (to_intro_patterns inj)
@@ -65,7 +65,7 @@ and to_intro_pattern_action : Tactypes.delayed_open_constr Tactypes.intro_patter
     let c =
       let open Proofview in
       Goal.enter_one ~__LOC__ @@ fun gl ->
-      let sigma, c = c (Goal.env gl) (Goal.sigma gl) in
+      let sigma, c = Tacmach.apply_named_delayed_open c (Goal.env gl) (Goal.sigma gl) in
       Proofview.Unsafe.tclEVARS sigma >>= fun () ->
       tclUNIT (of_constr c)
     in
@@ -73,7 +73,7 @@ and to_intro_pattern_action : Tactypes.delayed_open_constr Tactypes.intro_patter
     IntroApplyOn (c, to_intro_pattern ipat)
   | IntroRewrite b -> IntroRewrite b
 
-and to_or_and_intro_pattern : Tactypes.delayed_open_constr Tactypes.or_and_intro_pattern_expr -> Tac2types.or_and_intro_pattern = function
+and to_or_and_intro_pattern : Tactypes.named_delayed_open_constr Tactypes.or_and_intro_pattern_expr -> Tac2types.or_and_intro_pattern = function
   | IntroOrPattern ill -> IntroOrPattern (List.map to_intro_patterns ill)
   | IntroAndPattern il -> IntroAndPattern (to_intro_patterns il)
 

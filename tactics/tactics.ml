@@ -91,7 +91,7 @@ exception NotRightNumberConstructors of int
 exception NotEnoughConstructors
 exception ConstructorNumberedFromOne
 exception NoConstructors
-exception UnexpectedExtraPattern of int option * delayed_open_constr intro_pattern_expr
+exception UnexpectedExtraPattern of int option * named_delayed_open_constr intro_pattern_expr
 exception CannotFindInductiveArgument
 exception OneIntroPatternExpected
 exception KeepAndClearModifierOnlyForHypotheses
@@ -261,6 +261,8 @@ let error_replacing_dependency env sigma id err inglobal =
 (*********************************************)
 (*                 Tactics                   *)
 (*********************************************)
+
+let tag_delayed_open = ref Fun.id
 
 (******************************************)
 (*           Primitive tactics            *)
@@ -760,6 +762,7 @@ let e_change_in_concl ~cast ~check (redfun, sty) =
   Proofview.Goal.enter begin fun gl ->
     let sigma = Proofview.Goal.sigma gl in
     let (sigma, c') = redfun (Tacmach.pf_env gl) sigma (Tacmach.pf_concl gl) in
+    !tag_delayed_open @@
     Proofview.tclTHEN (Proofview.Unsafe.tclEVARS sigma)
     (convert_concl ~cast ~check c' sty)
   end
@@ -1391,7 +1394,7 @@ let finish_evar_resolution ?(flags=Pretyping.all_and_fail_flags) env current_sig
   (sigma, nf_evar sigma c)
 
 let finish_delayed_evar_resolution with_evars env sigma f =
-  let (sigma', (c, lbind)) = f env sigma in
+  let (sigma', (c, lbind)) = Tacmach.apply_named_delayed_open f env sigma in
   let flags = tactic_infer_flags with_evars in
   let (sigma', c) = finish_evar_resolution ~flags env sigma' (Some sigma,c) in
   (sigma', (c, lbind))
@@ -1886,7 +1889,7 @@ let apply_with_delayed_bindings_gen b e l =
       let env = Proofview.Goal.env gl in
       let (sigma, cb) = f env sigma in
         Tacticals.tclWITHHOLES e
-          (general_apply ~respect_opaque:(not b) b b e k CAst.(make ?loc cb)) sigma
+          (!tag_delayed_open (general_apply ~respect_opaque:(not b) b b e k CAst.(make ?loc cb))) sigma
     end
   in
   let rec aux = function
@@ -1999,8 +2002,8 @@ let apply_in_delayed_once ?(respect_opaque = false) with_delta
     let sigma = Tacmach.project gl in
     let (sigma, c) = f env sigma in
     Tacticals.tclWITHHOLES with_evars
-      (apply_in_once ~respect_opaque with_delta with_destruct with_evars
-         naming id (clear_flag,CAst.(make ?loc c)) tac)
+      (!tag_delayed_open (apply_in_once ~respect_opaque with_delta with_destruct with_evars
+         naming id (clear_flag,CAst.(make ?loc c)) tac))
       sigma
   end
 
@@ -2318,7 +2321,7 @@ let split_with_bindings with_evars l =
   Tacticals.tclMAP (constructor_tac with_evars (Some 1) 1) l
 let split_with_delayed_bindings with_evars bl =
   Tacticals.tclMAPDELAYEDWITHHOLES with_evars bl
-    (constructor_tac with_evars (Some 1) 1)
+    (fun bl -> !tag_delayed_open (constructor_tac with_evars (Some 1) 1 bl))
 
 let left           = left_with_bindings false
 let simplest_left  = left NoBindings
@@ -2565,7 +2568,7 @@ and intro_pattern_action ?loc with_evars pat thin destopt tac id =
   | IntroApplyOn ({CAst.loc=loc';v=f},{CAst.loc;v=pat}) ->
       let naming = NamingMustBe (CAst.make ?loc id) in
       let tac_ipat = prepare_action ?loc with_evars destopt pat in
-      let f env sigma = let (sigma, c) = f env sigma in (sigma,(c, NoBindings)) in
+      let f env sigma = let (sigma, c) = Tacmach.apply_named_delayed_open f env sigma in (sigma,(c, NoBindings)) in
       apply_in_delayed_once true true with_evars naming id (None,CAst.make ?loc:loc' f)
         (fun id -> Tacticals.tclTHENLIST [tac_ipat id; tac thin None []])
 
