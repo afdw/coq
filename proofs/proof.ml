@@ -552,7 +552,10 @@ let solve ?with_end_tac gi info_lvl tac pr =
       Option.assign event (
         if !Flags.tracing_no_event
         then Event.Sequence {elements = []}
-        else info |> Event.of_trace
+        else
+          if !Flags.tracing_do_not_filter_event
+          then info |> Event.of_trace
+          else info |> Proofview_monad.Info.filter |> Event.of_trace
       )
     end;
     let () =

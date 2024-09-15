@@ -109,3 +109,4 @@ val tracing_sub_suffix : string ref
 val tracing_compress : bool ref
 val tracing_low_level : bool ref
 val tracing_no_event : bool ref
+val tracing_do_not_filter_event : bool ref
