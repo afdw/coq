@@ -1068,7 +1068,7 @@ let interp_pattern ?wit_ssrpatternarg env sigma0 red redty =
            Id.Map.mem id ist.lfun &&
            not(Option.is_empty reccall) &&
            not(Option.is_empty wit_ssrpatternarg) ->
-        let v = Id.Map.find id (Option.get ist).lfun in
+        let v = Id.ObservableMap.find id (Option.get ist).lfun in
         Option.get reccall
           (Value.cast (topwit (Option.get wit_ssrpatternarg)) v)
     | it -> g t with e when CErrors.noncritical e -> g t in
@@ -1372,7 +1372,7 @@ let ssrpatterntac _ist arg =
 let () =
   let mltac _ ist =
     let arg =
-      let v = Id.Map.find (Names.Id.of_string "pattern") ist.lfun in
+      let v = Id.ObservableMap.find (Names.Id.of_string "pattern") ist.lfun in
       Value.cast (topwit wit_ssrpatternarg) v in
     ssrpatterntac ist arg in
   let name = { mltac_plugin = "coq-core.plugins.ssrmatching"; mltac_tactic = "ssrpattern"; } in

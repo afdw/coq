@@ -745,7 +745,7 @@ let explain_ltac_call_trace last trace =
             prlist_with_sep pr_comma
             (fun (id,c) ->
               Id.print id ++ str ":=" ++ Printer.pr_lconstr_under_binders_env env sigma c)
-            (List.rev (Id.Map.bindings vars)) ++ str ")"
+            (List.rev (Id.Map.bindings (vars |> Id.ObservableMap.forget))) ++ str ")"
         else mt())
   in
   match calls with

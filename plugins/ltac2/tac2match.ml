@@ -66,7 +66,7 @@ let verify_metas_coherence env sigma s1 s2 =
         if equal_instances env sigma c1 c2 then Some c1
         else raise Not_coherent_metas
   in
-  Id.Map.merge merge s1 s2
+  Id.ObservableMap.merge merge s1 s2
 
 let matching_error =
   CErrors.UserError Pp.(str "No matching clauses for match.")

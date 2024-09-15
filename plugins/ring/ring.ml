@@ -176,7 +176,7 @@ let get_res =
   let entry = { mltac_name = name; mltac_index = 0 } in
   let tac args ist =
     let n = Tacinterp.Value.cast (Genarg.topwit Stdarg.wit_int) (List.hd args) in
-    let init i = Id.Map.find (Id.of_string ("x" ^ string_of_int i)) ist.lfun in
+    let init i = Id.ObservableMap.find (Id.of_string ("x" ^ string_of_int i)) ist.lfun in
     tactic_res := Array.init n init;
     Proofview.tclUNIT ()
   in
@@ -187,7 +187,7 @@ let exec_tactic env sigma n f args =
   let fold arg (i, vars, lfun) =
     let id = Id.of_string ("x" ^ string_of_int i) in
     let x = Reference (ArgVar CAst.(make id)) in
-    (succ i, x :: vars, Id.Map.add id (Value.of_constr arg) lfun)
+    (succ i, x :: vars, Id.ObservableMap.add id (Value.of_constr arg) lfun)
   in
   let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
   let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun = lfun; } in

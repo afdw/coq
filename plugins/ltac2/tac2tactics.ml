@@ -169,7 +169,7 @@ let change pat c cl =
   let open Tac2ffi in
   Proofview.Goal.enter begin fun gl ->
   let c subst env sigma =
-    let subst = Array.map_of_list snd (Id.Map.bindings subst) in
+    let subst = Array.map_of_list snd (Id.Map.bindings (subst |> Id.ObservableMap.mark_all)) in
     delayed_of_tactic (Tac2ffi.app_fun1 c (array constr) constr subst) env sigma
   in
   let cl = mk_clause cl in

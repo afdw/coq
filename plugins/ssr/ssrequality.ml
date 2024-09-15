@@ -103,7 +103,7 @@ let congrtac ((n, t), ty) ist =
   let sigma = Evd.merge_universe_context sigma (Evd.evar_universe_context nsigma) in
   let f, _, _ucst = abs_evars env sigma it in
   let ist' = {ist with lfun =
-    Id.Map.add pattern_id (Tacinterp.Value.of_constr f) Id.Map.empty } in
+    Id.ObservableMap.add pattern_id (Tacinterp.Value.of_constr f) Id.Map.empty } in
   let rf = mkRltacVar pattern_id in
   let m = pf_nbargs env sigma f in
   let cf = if n > 0 then

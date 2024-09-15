@@ -369,7 +369,7 @@ let interp_index ist env sigma idx =
   | ArgVar id ->
     let i =
       try
-        let v = Id.Map.find id.CAst.v ist.Tacinterp.lfun in
+        let v = Id.ObservableMap.find id.CAst.v ist.Tacinterp.lfun in
         begin match Tacinterp.Value.to_int v with
         | Some i -> i
         | None ->

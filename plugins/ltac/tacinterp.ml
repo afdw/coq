@@ -143,7 +143,7 @@ let f_current_late_arg : late_arg TacStore.field = TacStore.field "f_current_lat
 
 (* Signature for interpretation: val_interp and interpretation functions *)
 type interp_sign = Geninterp.interp_sign =
-  { lfun : value Id.Map.t
+  { lfun : value Id.ObservableMap.t
   ; poly : bool
   ; extra : TacStore.t }
 
@@ -258,7 +258,7 @@ let pr_closure env sigma ist body =
     let arg = pr_argument_type arg in
     hov 0 (Id.print id ++ spc () ++ str ":" ++ spc () ++ arg)
   in
-  let pp_iargs = v 0 (prlist_with_sep pr_sep pr_iarg (Id.Map.bindings ist)) in
+  let pp_iargs = v 0 (prlist_with_sep pr_sep pr_iarg (Id.Map.bindings (ist |> Id.ObservableMap.forget))) in
   pp_body ++ fnl() ++ str "in environment " ++ fnl() ++ pp_iargs
 
 let pr_inspect env sigma expr result =
@@ -285,8 +285,8 @@ let constr_of_id env id =
 
 let push_trace call ist =
   if is_traced () then match TacStore.get ist.extra f_trace with
-  | None -> [call], [ist.lfun]
-  | Some (trace, varmaps) -> call :: trace, ist.lfun :: varmaps
+  | None -> [call], [ist.lfun |> Id.ObservableMap.forget]
+  | Some (trace, varmaps) -> call :: trace, (ist.lfun |> Id.ObservableMap.forget) :: varmaps
   else [],[]
 
 let propagate_trace ist loc id v =
@@ -340,9 +340,9 @@ let extend_values_with_bindings (ln,lm) lfun =
   in
   (* For compatibility, bound variables are visible only if no other
      binding of the same name exists *)
-  let accu = Id.Map.map value_of_ident ln in
+  let accu = Id.ObservableMap.map value_of_ident (ln |> Id.ObservableMap.remember) in
   let accu = lfun +++ accu in
-  Id.Map.fold (fun id c accu -> Id.Map.add id (of_cub c) accu) lm accu
+  Id.Map.fold (fun id (c, r) accu -> Id.Map.add id (of_cub c, r) accu) lm accu
 
 (***************************************************************************)
 (* Evaluation/interpretation *)
@@ -371,7 +371,7 @@ let ensure_freshness env =
 
 (* Raise Not_found if not in interpretation sign *)
 let try_interp_ltac_var coerce ist env {loc;v=id} =
-  let v = Id.Map.find id ist.lfun |> clone in
+  let v = Id.ObservableMap.find id ist.lfun |> clone in
   try coerce v with CannotCoerceTo s ->
     Taccoerce.error_ltac_variable ?loc id env v s
 
@@ -408,7 +408,7 @@ let interp_int_or_var ist = function
 
 let interp_int_as_list ist = function
   | ArgVar ({v=id} as locid) ->
-      (try coerce_to_int_list (Id.Map.find id ist.lfun)
+      (try coerce_to_int_list (Id.ObservableMap.find id ist.lfun)
        with Not_found | CannotCoerceTo _ -> [interp_int ist locid])
   | ArgArg n -> [n]
 
@@ -425,7 +425,7 @@ let interp_hyp ist env sigma ({loc;v=id} as locid) =
   else Loc.raise ?loc (Logic.RefinerError (env, sigma, Logic.NoSuchHyp id))
 
 let interp_hyp_list_as_list ist env sigma ({loc;v=id} as x) =
-  try coerce_to_hyp_list env sigma (Id.Map.find id ist.lfun)
+  try coerce_to_hyp_list env sigma (Id.ObservableMap.find id ist.lfun)
   with Not_found | CannotCoerceTo _ -> [interp_hyp ist env sigma x]
 
 let interp_hyp_list ist env sigma l =
@@ -501,10 +501,10 @@ let interp_clause ist env sigma { onhyps=ol; concl_occs=occs } : clause =
 
 (* Extract the constr list from lfun *)
 let extract_ltac_constr_values ist env =
-  let fold id v accu =
+  let fold id (v, r) accu =
     try
       let c = coerce_to_constr env v in
-      Id.Map.add id c accu
+      Id.Map.add id (c, r) accu
     with CannotCoerceTo _ -> accu
   in
   Id.Map.fold fold ist.lfun Id.Map.empty
@@ -549,7 +549,7 @@ let interp_fresh_id ist env sigma l =
   | None -> Id.Set.empty
   | Some l -> l
   in
-  let avoid = extract_ids ids ist.lfun avoid in
+  let avoid = extract_ids ids (ist.lfun |> Id.ObservableMap.forget) avoid in
   let id =
     if List.is_empty l then default_fresh_id
     else
@@ -563,22 +563,22 @@ let interp_fresh_id ist env sigma l =
 
 (* Extract the uconstr list from lfun *)
 let extract_ltac_constr_context ist env sigma =
-  let add_uconstr id v map =
-    try Id.Map.add id (coerce_to_uconstr v) map
+  let add_uconstr id v r map =
+    try Id.Map.add id (coerce_to_uconstr v, r) map
     with CannotCoerceTo _ -> map
   in
-  let add_constr id v map =
-    try Id.Map.add id (coerce_to_constr env v) map
+  let add_constr id v r map =
+    try Id.Map.add id (coerce_to_constr env v, r) map
     with CannotCoerceTo _ -> map
   in
-  let add_ident id v map =
-    try Id.Map.add id (coerce_var_to_ident false env sigma v) map
+  let add_ident id v r map =
+    try Id.Map.add id (coerce_var_to_ident false env sigma v, r) map
     with CannotCoerceTo _ -> map
   in
-  let fold id v {idents;typed;untyped;genargs} =
-    let idents = add_ident id v idents in
-    let typed = add_constr id v typed in
-    let untyped = add_uconstr id v untyped in
+  let fold id (v, r) {idents;typed;untyped;genargs} =
+    let idents = add_ident id v r idents in
+    let typed = add_constr id v r typed in
+    let untyped = add_uconstr id v r untyped in
     { idents ; typed ; untyped; genargs }
   in
   let empty = { idents = Id.Map.empty ;typed = Id.Map.empty ; untyped = Id.Map.empty; genargs = ist.lfun } in
@@ -718,7 +718,7 @@ let interp_constr_in_compound_list inj_fun dest_fun interp_fun ist env sigma l =
   let try_expand_ltac_var sigma x =
     try match DAst.get (fst (dest_fun x)) with
     | GVar id ->
-      let v = Id.Map.find id ist.lfun in
+      let v = Id.ObservableMap.find id ist.lfun in
       sigma, List.map inj_fun (coerce_to_constr_list env v)
     | _ ->
         raise Not_found
@@ -841,7 +841,7 @@ let interp_message_ftactic ist l =
     | MsgString s -> Ftactic.return (str s)
     | MsgInt n -> Ftactic.return (int n)
     | MsgIdent {loc; v = id} ->
-      match ist.lfun |> Id.Map.find_opt id with
+      match ist.lfun |> Id.ObservableMap.find_opt id with
       | None ->
         Ftactic.lift (
           let info = Exninfo.reify () in
@@ -902,7 +902,7 @@ and interp_or_and_intro_pattern ist env sigma = function
 
 and interp_intro_pattern_list_as_list ist env sigma = function
   | [{loc;v=IntroNaming (IntroIdentifier id)}] as l ->
-      (try coerce_to_intro_pattern_list ?loc sigma (Id.Map.find id ist.lfun |> clone)
+      (try coerce_to_intro_pattern_list ?loc sigma (Id.ObservableMap.find id ist.lfun |> clone)
        with Not_found | CannotCoerceTo _ ->
          List.map (interp_intro_pattern ist env sigma) l)
   | l -> List.map (interp_intro_pattern ist env sigma) l
@@ -1010,7 +1010,7 @@ let interp_destruction_arg ist gl arg =
       in
       try
         (* FIXME: should be moved to taccoerce *)
-        let v = Id.Map.find id ist.lfun in
+        let v = Id.ObservableMap.find id ist.lfun in
         if has_type v (topwit wit_intro_pattern) then
           let v = out_gen (topwit wit_intro_pattern) v in
           match v with
@@ -1100,17 +1100,33 @@ let type_uconstr ?(flags = (constr_flags ()))
 let tag_print_gen lfun k t =
   Proofview.tclENV >>= fun env ->
   Proofview.tclEVARMAP >>= fun sigma ->
+  let used = ref Id.Set.empty in
+  let fs =
+    lfun |> Id.Map.mapi (fun id (_, r) ->
+      let f () =
+        (* Feedback.msg_info Pp.(str "inside " ++ str (k |> Proofview_monad.Info.tactic_kind_to_yojson |> Yojson.Safe.to_string) ++ str " used " ++ str (id |> Id.to_string)); *)
+        used := !used |> Id.Set.add id in
+      r := f :: !r;
+      f
+    ) in
+  Proofview.Trace.tag_new_deferred_contents (fun deferred_id ->
+    t >>= fun a ->
+    Proofview.tclUNIT (deferred_id, a)
+  ) >>= fun (deferred_id, a) ->
+  lfun |> Id.Map.iter (fun id (_, r) -> r := !r |> List.remove (==) (fs |> Id.Map.find id));
   Proofview.Trace.tag_tactic
     k
     (fun () ->
+      let lfun = lfun |> Id.ObservableMap.filter (fun id _ -> !used |> Id.Set.mem id) in
       Pputils.pr_glb_generic env sigma None (GenArg (
         Glbwit wit_tacvalue,
         VFun (UnnamedAppl, ([], []), None, lfun, [], glob_late_arg_tac print_late_arg)
       ))
     )
-    t
+    (Proofview.Trace.deferred_placeholder deferred_id) <*>
+  Proofview.tclUNIT a
 
-let f_last_lfun : value Id.Map.t Evd.Store.field = Evd.Store.field "last_lfun"
+let f_last_lfun : value Id.ObservableMap.t Evd.Store.field = Evd.Store.field "last_lfun"
 
 let tag_print ist k t =
   Proofview.tclEVARMAP >>= fun sigma ->
@@ -1166,7 +1182,7 @@ let rec val_interp_ftactic deferred_id ist ?(appl = UnnamedAppl) (tac : glob_tac
           Ftactic.return (
             TaggedVal.make
               deferred_id
-              (of_tacvalue (VFun (UnnamedAppl, extract_trace ist, extract_loc ist, ist.lfun, [], tac)))
+              (of_tacvalue (VFun (UnnamedAppl, extract_trace ist, extract_loc ist, ist.lfun |> Id.ObservableMap.freeze, [], tac)))
           )
         )
       ) in
@@ -1177,7 +1193,7 @@ let rec val_interp_ftactic deferred_id ist ?(appl = UnnamedAppl) (tac : glob_tac
       let ist = {ist with extra = TacStore.set ist.extra f_debug v} in
       aux ist >>= fun v -> Ftactic.return (name_vfun appl v)
     in
-    Tactic_debug.debug_prompt lev tac eval ist.lfun (TacStore.get ist.extra f_trace)
+    Tactic_debug.debug_prompt lev tac eval (ist.lfun |> Id.ObservableMap.forget) (TacStore.get ist.extra f_trace)
   | _ ->
     aux ist >>= fun v -> Ftactic.return (name_vfun appl v)
 
@@ -1329,7 +1345,7 @@ and eval_tactic_ist ist tac : unit Proofview.tactic =
           ) (deferred_id, [])) >>= fun (deferred_id, args_interp) ->
           let args_interp = List.rev args_interp in
           let trace = push_trace (loc, LtacNotationCall s) ist in
-          let lfun = List.fold_right2 Id.Map.add s_interp.alias_args args_interp ist.lfun in
+          let lfun = List.fold_right2 Id.ObservableMap.add s_interp.alias_args args_interp ist.lfun in
           let ist = {lfun; poly; extra = add_extra_loc loc (add_extra_trace trace ist.extra)} in
           val_interp_ftactic deferred_id ist s_interp.alias_body >>= fun v ->
           let tac_interp = tactic_of_tagged_value ist v in
@@ -1384,7 +1400,7 @@ and interp_ltac_reference_ftactic ?loc' mustbetac deferred_id ist r : TaggedVal.
       let (>>=) = Ftactic.bind in
       Proofview.Trace.tag_deferred_contents deferred_id (
         let v =
-          ist.lfun |> Id.Map.find_opt id |> Option.map clone |> Option.default (in_gen (topwit wit_hyp) id) in
+          ist.lfun |> Id.ObservableMap.find_opt id |> Option.map clone |> Option.default (in_gen (topwit wit_hyp) id) in
         populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, Genarg.in_gen (glbwit wit_value) v)))) <*>
         tag_print ist (Proofview_monad.Info.Builtin (Pp.str "ArgVar")) (
           Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
@@ -1395,7 +1411,7 @@ and interp_ltac_reference_ftactic ?loc' mustbetac deferred_id ist r : TaggedVal.
       )
   | ArgArg (loc, r) ->
       Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
-      let ids = extract_ids [] ist.lfun Id.Set.empty in
+      let ids = extract_ids [] (ist.lfun |> Id.ObservableMap.forget) Id.Set.empty in
       let extra = TacStore.set ist.extra f_avoid_ids ids in
       let trace = push_trace (Option.default loc loc', LtacNameCall r) ist in
       let extra = TacStore.set extra f_trace trace in
@@ -1530,7 +1546,7 @@ and interp_app loc deferred_id ist fv largs : TaggedVal.t Ftactic.t =
             | {CAst.v=(TacMatch _)}
             | {CAst.v=(TacArg _)} as body))) ->
         let (extfun,lvar,lval)=head_with_value (var,largs) in
-        let fold accu (id, v) = Id.Map.add id v accu in
+        let fold accu (id, v) = Id.ObservableMap.add id v accu in
         let newlfun = List.fold_left fold olfun extfun in
       if List.is_empty lvar then
         begin wrap_error
@@ -1665,7 +1681,7 @@ and interp_letrec deferred_id ist llc u =
       let lref = ref ist.lfun in
       let fold accu ({v = na}, b) =
         let v = of_tacvalue (VRec (lref, CAst.make (TacArg b))) in
-        Name.fold_right (fun id -> Id.Map.add id v) na accu in
+        Name.fold_right (fun id -> Id.ObservableMap.add id v) na accu in
       let lfun = List.fold_left fold ist.lfun llc in
       lref := lfun;
       let ist = {ist with lfun} in
@@ -1689,7 +1705,7 @@ and interp_letin deferred_id ist llc u =
       tag_print ist (Proofview_monad.Info.Builtin (Pp.str "TacLetIn")) (
         Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
         interp_tacarg_ftactic deferred_id (set_current_late_arg ist body_late_arg) body >>= fun body_interp ->
-        fold body_interp.deferred_id {ist with lfun = Name.fold_right (fun id -> Id.Map.add id body_interp.v) name.v ist.lfun} defs
+        fold body_interp.deferred_id {ist with lfun = Name.fold_right (fun id -> Id.ObservableMap.add id body_interp.v) name.v ist.lfun} defs
       )
     ) in
   fold deferred_id ist llc
@@ -1699,8 +1715,8 @@ and interp_letin deferred_id ist llc u =
 and interp_match_success deferred_id ist { Tactic_matching.subst ; context ; terms ; lhs } =
   Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
   let (>>=) = Ftactic.bind in
-  let lctxt = Id.Map.map interp_context context in
-  let hyp_subst = Id.Map.map Value.of_constr terms in
+  let lctxt = Id.ObservableMap.map interp_context (context |> Id.ObservableMap.remember) in
+  let hyp_subst = Id.ObservableMap.map Value.of_constr (terms |> Id.ObservableMap.remember) in
   let lfun = extend_values_with_bindings subst (lctxt +++ hyp_subst +++ ist.lfun) in
   let ist = { ist with lfun } in
   val_interp_ftactic deferred_id ist lhs >>= fun v ->
@@ -2139,8 +2155,8 @@ and interp_atomic ist tac : unit Proofview.tactic =
         in
         let default = GenArg (Glbwit wit_constr, c) in
         let c_interp patvars env sigma =
-          let lfun' = Id.Map.fold (fun id c lfun ->
-            Id.Map.add id (Value.of_constr c) lfun)
+          let lfun' = Id.Map.fold (fun id (c, r) lfun ->
+            Id.Map.add id (Value.of_constr c, r) lfun)
             patvars ist.lfun
           in
           let ist = { ist with lfun = lfun' } in
@@ -2163,8 +2179,8 @@ and interp_atomic ist tac : unit Proofview.tactic =
         let to_catch = function Not_found -> true | e -> CErrors.is_anomaly e in
         let default = GenArg (Glbwit wit_constr, c) in
         let c_interp patvars env sigma =
-          let lfun' = Id.Map.fold (fun id c lfun ->
-            Id.Map.add id (Value.of_constr c) lfun)
+          let lfun' = Id.Map.fold (fun id (c, r) lfun ->
+            Id.Map.add id (Value.of_constr c, r) lfun)
             patvars ist.lfun
           in
           let env = ensure_freshness env in
@@ -2282,10 +2298,10 @@ module Value = struct
     let fold arg (i, vars, lfun) =
       let id = Id.of_string ("x" ^ string_of_int i) in
       let x = Reference (ArgVar CAst.(make id)) in
-      (succ i, x :: vars, Id.Map.add id arg lfun)
+      (succ i, x :: vars, Id.ObservableMap.add id arg lfun)
     in
     let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
-    let lfun = Id.Map.add (Id.of_string "F") f lfun in
+    let lfun = Id.ObservableMap.add (Id.of_string "F") f lfun in
     let ist = { (default_ist ()) with lfun = lfun; } in
     ist, CAst.make @@ TacArg (TacCall (CAst.make (ArgVar CAst.(make @@ Id.of_string "F"),args)))
 

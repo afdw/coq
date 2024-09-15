@@ -41,7 +41,7 @@ let instantiate_pattern env sigma lvar c =
   let rec aux vars = function
   | PVar id as x ->
       (try
-        let ctx,c = Id.Map.find id lvar in
+        let ctx,c = Id.ObservableMap.find id lvar in
         try
           let inst =
             List.map
@@ -490,10 +490,10 @@ let matches_core_closed env sigma pat c =
 
 let extended_matches env sigma pat c =
   let (names,_), subst = matches_core env sigma true pat c in
-  names, subst
+  names, subst |> Id.ObservableMap.remember
 
 let matches env sigma pat c =
-  snd (matches_core_closed env sigma (Id.Set.empty,pat) c)
+  snd (matches_core_closed env sigma (Id.Set.empty,pat) c) |> Id.ObservableMap.remember
 
 type context = constr Lazy.t
 
@@ -532,7 +532,7 @@ let authorized_occ env sigma closed pat c mk_ctx =
     let subst = matches_core_closed env sigma pat c in
     if closed && Id.Map.exists (fun _ c -> not (closed0 sigma c)) (snd subst)
     then (fun next -> next ())
-    else (fun next -> mkresult subst (lazy (mk_ctx (mkMeta special_meta))) next)
+    else (fun next -> mkresult (fst subst, snd subst |> Id.ObservableMap.remember) (lazy (mk_ctx (mkMeta special_meta))) next)
   with PatternMatchingFailure -> (fun next -> next ())
 
 let subargs env v = Array.map_to_list (fun c -> (env, c)) v

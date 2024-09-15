@@ -118,7 +118,7 @@ let conclPattern concl pat tac =
      | Val.Base tag -> Val.Dyn (tag, c)
      | _ -> assert false
      in
-     let fold id c accu = Id.Map.add id (inj c) accu in
+     let fold id (c, r) accu = Id.Map.add id (inj c, r) accu in
      let lfun = Id.Map.fold fold constr_bindings Id.Map.empty in
      let ist = { lfun
                ; poly

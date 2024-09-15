@@ -292,8 +292,8 @@ match Val.eq tag val_env with
 | Some Refl -> v
 
 let get_env ist =
-  try extract_env (Id.Map.find env_ref ist)
+  try extract_env (Id.ObservableMap.find env_ref ist)
   with Not_found -> empty_environment
 
 let set_env env ist =
-  Id.Map.add env_ref (Val.Dyn (val_env, env)) ist
+  Id.ObservableMap.add env_ref (Val.Dyn (val_env, env)) ist

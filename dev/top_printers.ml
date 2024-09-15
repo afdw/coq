@@ -165,9 +165,9 @@ let ppunbound_ltac_var_map l = ppidmap (fun _ arg ->
 
 open Ltac_pretype
 let rec pr_closure {idents=idents;typed=typed;untyped=untyped} =
-  hov 1 (str"{idents=" ++ prididmap idents ++ str";" ++ spc() ++
-         str"typed=" ++ prconstrunderbindersidmap typed ++ str";" ++ spc() ++
-         str"untyped=" ++ pr_closed_glob_constr_idmap untyped ++ str"}")
+  hov 1 (str"{idents=" ++ prididmap (idents |> Id.ObservableMap.forget) ++ str";" ++ spc() ++
+         str"typed=" ++ prconstrunderbindersidmap (typed |> Id.ObservableMap.forget) ++ str";" ++ spc() ++
+         str"untyped=" ++ pr_closed_glob_constr_idmap (untyped |> Id.ObservableMap.forget) ++ str"}")
 and pr_closed_glob_constr_idmap x =
   pridmap (fun _ -> pr_closed_glob_constr) x
 and pr_closed_glob_constr {closure=closure;term=term} =
@@ -614,7 +614,7 @@ let ppgenargargt arg = pp (str (Genarg.ArgT.repr arg))
 
 let ppist ist =
   let pr id arg = prgenarginfo arg in
-  pp (pridmap pr ist.Geninterp.lfun)
+  pp (pridmap pr (ist.Geninterp.lfun |> Id.ObservableMap.forget))
 
 (**********************************************************************)
 (* Vernac-level debugging commands                                    *)

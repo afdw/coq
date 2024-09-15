@@ -41,7 +41,7 @@ type 'a t = {
     substitution of the former type to the latter. *)
 let adjust : Constr_matching.bound_ident_map * Ltac_pretype.patvar_map ->
              Constr_matching.bound_ident_map * Ltac_pretype.extended_patvar_map =
-  fun (l, lc) -> (l, Id.Map.map (fun c -> [], c) lc)
+  fun (l, lc) -> (l, Id.ObservableMap.map (fun c -> [], c) lc)
 
 
 (** Adds a binding to a {!Id.Map.t} if the identifier is [Some id] *)
@@ -105,7 +105,7 @@ let verify_metas_coherence env sigma (ln1,lcm) (ln,lm) =
   let (+++) lfun1 lfun2 = Id.Map.fold Id.Map.add lfun1 lfun2 in
   (* ppedrot: Is that even correct? *)
   let merged = ln +++ ln1 in
-  (merged, Id.Map.merge merge lcm lm)
+  (merged, Id.ObservableMap.merge merge lcm lm)
 
 let matching_error =
   CErrors.UserError Pp.(str "No matching clauses for match.")

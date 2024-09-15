@@ -892,7 +892,7 @@ let () =
   begin match ans with
   | None -> fail err_matchfailure
   | Some ans ->
-    let ans = Id.Map.bindings ans in
+    let ans = Id.Map.bindings (ans |> Id.ObservableMap.mark_all) in
     let of_pair (id, c) = Tac2ffi.of_tuple [| Tac2ffi.of_ident id; Tac2ffi.of_constr c |] in
     return (Tac2ffi.of_list of_pair ans)
   end
@@ -903,7 +903,7 @@ let () =
   let rec of_ans s = match IStream.peek s with
   | IStream.Nil -> fail err_matchfailure
   | IStream.Cons ({ m_sub = (_, sub); m_ctx }, s) ->
-    let ans = Id.Map.bindings sub in
+    let ans = Id.Map.bindings (sub |> Id.ObservableMap.mark_all) in
     let of_pair (id, c) =
       Tac2ffi.of_tuple [| Tac2ffi.of_ident id; Tac2ffi.of_constr c |]
     in
@@ -930,7 +930,7 @@ let () =
   match ans with
   | None -> fail err_matchfailure
   | Some ans ->
-    let ans = Id.Map.bindings ans in
+    let ans = Id.Map.bindings (ans |> Id.ObservableMap.mark_all) in
     let ans = Array.map_of_list snd ans in
     return (Tac2ffi.of_array Tac2ffi.of_constr ans)
 
@@ -940,7 +940,7 @@ let () =
   let rec of_ans s = match IStream.peek s with
   | IStream.Nil -> fail err_matchfailure
   | IStream.Cons ({ m_sub = (_, sub); m_ctx }, s) ->
-    let ans = Id.Map.bindings sub in
+    let ans = Id.Map.bindings (sub |> Id.ObservableMap.mark_all) in
     let ans = Array.map_of_list snd ans in
     let ans =
       Tac2ffi.of_tuple [|
@@ -977,7 +977,7 @@ let () =
       (Array.of_list (CList.filter_map (fun (_,bctx,_) -> bctx) hyps))
   in
   let hctx = Tac2ffi.of_array of_ctxopt (Array.map_of_list pi3 hyps) in
-  let subs = Tac2ffi.of_array Tac2ffi.of_constr (Array.map_of_list snd (Id.Map.bindings subst)) in
+  let subs = Tac2ffi.of_array Tac2ffi.of_constr (Array.map_of_list snd (Id.Map.bindings (subst |> Id.ObservableMap.mark_all))) in
   let cctx = of_ctxopt ctx in
   let ans = Tac2ffi.of_tuple [| hids; hbctx; hctx; subs; cctx |] in
   Proofview.tclUNIT ans
@@ -1700,7 +1700,7 @@ let () =
     let closure = {
       idents = Id.Map.empty;
       typed = Id.Map.empty;
-      untyped = Id.Map.bind get_preterm ids;
+      untyped = Id.Map.bind get_preterm ids |> Id.ObservableMap.remember;
       genargs = Tac2interp.set_env env Id.Map.empty;
     } in
     let c = { closure; term = c } in

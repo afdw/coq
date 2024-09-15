@@ -67,10 +67,10 @@ let () =
   let fold arg (i, vars, lfun) =
     let id = Id.of_string ("x" ^ string_of_int i) in
     let x = Reference (ArgVar CAst.(make id)) in
-    (succ i, x :: vars, Id.Map.add id arg lfun)
+    (succ i, x :: vars, Id.ObservableMap.add id arg lfun)
   in
   let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
-  let lfun = Id.Map.add (Id.of_string "F") f lfun in
+  let lfun = Id.ObservableMap.add (Id.of_string "F") f lfun in
   let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun = lfun; } in
   let tac = CAst.make @@ TacArg (TacCall (CAst.make (ArgVar CAst.(make @@ Id.of_string "F"),args))) in
   Tacinterp.val_interp ist tac k
@@ -144,7 +144,7 @@ let () =
     let clos args =
       let add lfun id v =
         let v = Tac2ffi.to_ext val_ltac1 v in
-        Id.Map.add id v lfun
+        Id.ObservableMap.add id v lfun
       in
       let lfun = List.fold_left2 add Id.Map.empty ids args in
       let ist = { env_ist = Id.Map.empty } in
@@ -203,7 +203,7 @@ let () =
     let clos args =
       let add lfun id v =
         let v = Tac2ffi.to_ext val_ltac1 v in
-        Id.Map.add id v lfun
+        Id.ObservableMap.add id v lfun
       in
       let lfun = List.fold_left2 add Id.Map.empty ids args in
       let ist = { env_ist = Id.Map.empty } in
@@ -278,8 +278,8 @@ let () =
   let tac_id = Id.of_string "F" in
   let arg_id = Id.of_string "X" in
   let interp_fun deferred_id ist () =
-    let tac = cast_typ typ_ltac2 @@ Id.Map.get tac_id ist.Tacinterp.lfun in
-    let arg = Id.Map.get arg_id ist.Tacinterp.lfun in
+    let tac = cast_typ typ_ltac2 @@ Id.ObservableMap.get tac_id ist.Tacinterp.lfun in
+    let arg = Id.ObservableMap.get arg_id ist.Tacinterp.lfun in
     let tac = Tac2ffi.to_closure tac in
     Tac2val.apply tac [of_ltac1 arg] >>= fun ans ->
     let ans = Tac2ffi.to_ext val_ltac1 ans in
@@ -290,7 +290,7 @@ let () =
   let body = Tacexpr.TacGeneric (Some ltac2_ltac1_plugin, in_gen (glbwit wit_ltac2_val) ()) in
   let clos = CAst.make (Tacexpr.TacFun ([Name arg_id], CAst.make (Tacexpr.TacArg body))) in
   let f = Geninterp.Val.inject (Geninterp.Val.Base typ_ltac2) f in
-  let lfun = Id.Map.singleton tac_id f in
+  let lfun = Id.ObservableMap.singleton tac_id f in
   let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun } in
   Tacinterp.Value.of_closure ist clos
 
@@ -337,7 +337,7 @@ let () =
     let self = GTacFun (List.map (fun id -> Name id) ids, tac) in
     let self = Tac2interp.interp_value { env_ist = Id.Map.empty } self in
     let self = Geninterp.Val.inject (Geninterp.Val.Base typ_ltac2) self in
-    let ist = { ist with lfun = Id.Map.singleton self_id self } in
+    let ist = { ist with lfun = Id.ObservableMap.singleton self_id self } in
     Ftactic.return (Geninterp.TaggedVal.make deferred_id (Value.of_closure ist clos))
   in
   Geninterp.register_interp0 wit_ltac2in1 interp

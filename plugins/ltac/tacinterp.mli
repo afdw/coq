@@ -41,7 +41,7 @@ module TacStore : Store.S with
 
 (** Signature for interpretation: val\_interp and interpretation functions *)
 type interp_sign = Geninterp.interp_sign =
-  { lfun : value Id.Map.t
+  { lfun : value Id.ObservableMap.t
   ; poly : bool
   ; extra : TacStore.t }
 
@@ -60,7 +60,7 @@ val tag_print : interp_sign -> Proofview_monad.Info.tactic_kind -> 'a Proofview.
 val tag_delayed_open : 'a Proofview.tactic -> 'a Proofview.tactic
 
 val extract_ltac_constr_values : interp_sign -> Environ.env ->
-  Ltac_pretype.constr_under_binders Id.Map.t
+  Ltac_pretype.constr_under_binders Id.ObservableMap.t
 (** Given an interpretation signature, extract all values which are coercible to
     a [constr]. *)
 
@@ -131,7 +131,7 @@ val tactic_of_value : interp_sign -> Value.t -> unit Proofview.tactic
 
 (** Globalization + interpretation *)
 
-val interp_tac_gen : value Id.Map.t -> Id.Set.t ->
+val interp_tac_gen : value Id.ObservableMap.t -> Id.Set.t ->
                  debug_info -> raw_tactic_expr -> unit Proofview.tactic
 
 val interp : raw_tactic_expr -> unit Proofview.tactic
