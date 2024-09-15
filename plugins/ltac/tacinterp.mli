@@ -56,6 +56,9 @@ val populate_late_arg : late_arg -> glob_tactic_expr -> unit Proofview.tactic
 
 val populate_current_late_arg : interp_sign -> glob_tactic_expr -> unit Proofview.tactic
 
+val mark_var_usage : Id.t -> unit Proofview.tactic
+val mark_var_assignment : Id.t -> unit Proofview.tactic
+
 val tag_print : interp_sign -> Proofview_monad.Info.tactic_kind -> 'a Proofview.tactic -> 'a Proofview.tactic
 val tag_delayed_open : 'a Proofview.tactic -> 'a Proofview.tactic
 

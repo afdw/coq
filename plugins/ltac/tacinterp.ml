@@ -314,6 +314,26 @@ let append_trace trace v =
     | _ -> v
   else v
 
+let f_used_vars : Id.Set.t Evd.Store.field = Evd.Store.field "used_vars"
+
+let mark_var_usage id =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let used_vars = Evd.Store.get store f_used_vars |> Option.default Id.Set.empty in
+  let used_vars = used_vars |> Id.Set.add id in
+  let store = Evd.Store.set store f_used_vars used_vars in
+  let sigma = Evd.set_extra_data store sigma in
+  Proofview.Unsafe.tclEVARS sigma
+
+let mark_var_assignment id =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let used_vars = Evd.Store.get store f_used_vars |> Option.default Id.Set.empty in
+  let used_vars = used_vars |> Id.Set.remove id in
+  let store = Evd.Store.set store f_used_vars used_vars in
+  let sigma = Evd.set_extra_data store sigma in
+    Proofview.Unsafe.tclEVARS sigma
+
 (* Dynamically check that an argument is a tactic *)
 let coerce_to_tactic loc id v =
   let fail () = user_err ?loc
@@ -370,71 +390,72 @@ let ensure_freshness env =
     (fun d e -> EConstr.push_rel (Context.Rel.Declaration.set_name Anonymous d) e) env
 
 (* Raise Not_found if not in interpretation sign *)
-let try_interp_ltac_var coerce ist env {loc;v=id} =
+let try_interp_ltac_var coerce ist accessed_vars env {loc;v=id} =
+  accessed_vars := id :: !accessed_vars;
   let v = Id.Map.find id ist.lfun |> clone in
   try coerce v with CannotCoerceTo s ->
     Taccoerce.error_ltac_variable ?loc id env v s
 
-let interp_ltac_var coerce ist env locid =
-  try try_interp_ltac_var coerce ist env locid
+let interp_ltac_var coerce ist accessed_vars env locid =
+  try try_interp_ltac_var coerce ist accessed_vars env locid
   with Not_found -> anomaly (str "Detected '" ++ Id.print locid.v ++ str "' as ltac var at interning time.")
 
-let interp_ident ist env sigma id =
-  try try_interp_ltac_var (coerce_var_to_ident false env sigma) ist (Some (env,sigma)) (CAst.make id)
+let interp_ident ist accessed_vars env sigma id =
+  try try_interp_ltac_var (coerce_var_to_ident false env sigma) ist accessed_vars (Some (env,sigma)) (CAst.make id)
   with Not_found -> id
 
 (* Interprets an optional identifier, bound or fresh *)
-let interp_name ist env sigma = function
+let interp_name ist accessed_vars env sigma = function
   | Anonymous -> Anonymous
-  | Name id -> Name (interp_ident ist env sigma id)
+  | Name id -> Name (interp_ident ist accessed_vars env sigma id)
 
-let interp_intro_pattern_var loc ist env sigma id =
-  try try_interp_ltac_var (coerce_to_intro_pattern sigma) ist (Some (env,sigma)) (CAst.make ?loc id)
+let interp_intro_pattern_var loc ist accessed_vars env sigma id =
+  try try_interp_ltac_var (coerce_to_intro_pattern sigma) ist accessed_vars (Some (env,sigma)) (CAst.make ?loc id)
   with Not_found -> IntroNaming (IntroIdentifier id)
 
-let interp_intro_pattern_naming_var loc ist env sigma id =
-  try try_interp_ltac_var (coerce_to_intro_pattern_naming sigma) ist (Some (env,sigma)) (CAst.make ?loc id)
+let interp_intro_pattern_naming_var loc ist accessed_vars env sigma id =
+  try try_interp_ltac_var (coerce_to_intro_pattern_naming sigma) ist accessed_vars (Some (env,sigma)) (CAst.make ?loc id)
   with Not_found -> IntroIdentifier id
 
-let interp_int ist ({loc;v=id} as locid) =
-  try try_interp_ltac_var coerce_to_int ist None locid
+let interp_int ist accessed_vars ({loc;v=id} as locid) =
+  try try_interp_ltac_var coerce_to_int ist accessed_vars None locid
   with Not_found ->
     user_err ?loc
      (str "Unbound variable "  ++ Id.print id ++ str".")
 
-let interp_int_or_var ist = function
-  | ArgVar locid -> interp_int ist locid
+let interp_int_or_var ist accessed_vars = function
+  | ArgVar locid -> interp_int ist accessed_vars locid
   | ArgArg n -> n
 
-let interp_int_as_list ist = function
+let interp_int_as_list ist accessed_vars = function
   | ArgVar ({v=id} as locid) ->
       (try coerce_to_int_list (Id.Map.find id ist.lfun)
-       with Not_found | CannotCoerceTo _ -> [interp_int ist locid])
+       with Not_found | CannotCoerceTo _ -> [interp_int ist accessed_vars locid])
   | ArgArg n -> [n]
 
-let interp_int_list ist l =
-  List.flatten (List.map (interp_int_as_list ist) l)
+let interp_int_list ist accessed_vars l =
+  List.flatten (List.map (interp_int_as_list ist accessed_vars) l)
 
 (* Interprets a bound variable (especially an existing hypothesis) *)
-let interp_hyp ist env sigma ({loc;v=id} as locid) =
+let interp_hyp ist accessed_vars env sigma ({loc;v=id} as locid) =
   (* Look first in lfun for a value coercible to a variable *)
-  try try_interp_ltac_var (coerce_to_hyp env sigma) ist (Some (env,sigma)) locid
+  try try_interp_ltac_var (coerce_to_hyp env sigma) ist accessed_vars (Some (env,sigma)) locid
   with Not_found ->
   (* Then look if bound in the proof context at calling time *)
   if is_variable env id then id
   else Loc.raise ?loc (Logic.RefinerError (env, sigma, Logic.NoSuchHyp id))
 
-let interp_hyp_list_as_list ist env sigma ({loc;v=id} as x) =
+let interp_hyp_list_as_list ist accessed_vars env sigma ({loc;v=id} as x) =
   try coerce_to_hyp_list env sigma (Id.Map.find id ist.lfun)
-  with Not_found | CannotCoerceTo _ -> [interp_hyp ist env sigma x]
+  with Not_found | CannotCoerceTo _ -> [interp_hyp ist accessed_vars env sigma x]
 
-let interp_hyp_list ist env sigma l =
-  List.flatten (List.map (interp_hyp_list_as_list ist env sigma) l)
+let interp_hyp_list ist accessed_vars env sigma l =
+  List.flatten (List.map (interp_hyp_list_as_list ist accessed_vars env sigma) l)
 
-let interp_reference ist env sigma = function
+let interp_reference ist accessed_vars env sigma = function
   | ArgArg (_,r) -> r
   | ArgVar {loc;v=id} ->
-    try try_interp_ltac_var (coerce_to_reference sigma) ist (Some (env,sigma)) (CAst.make ?loc id)
+    try try_interp_ltac_var (coerce_to_reference sigma) ist accessed_vars (Some (env,sigma)) (CAst.make ?loc id)
     with Not_found ->
       try
         GlobRef.VarRef (get_id (Environ.lookup_named id env))
@@ -448,7 +469,7 @@ let try_interp_evaluable env (loc, id) =
   | LocalDef _ -> Evaluable.EvalVarRef id
   | _ -> error_not_evaluable (GlobRef.VarRef id)
 
-let interp_evaluable ist env sigma = function
+let interp_evaluable ist accessed_vars env sigma = function
   | ArgArg (r,Some {loc;v=id}) ->
     (* Maybe [id] has been introduced by Intro-like tactics *)
     begin
@@ -463,7 +484,7 @@ let interp_evaluable ist env sigma = function
     end
   | ArgArg (r,None) -> r
   | ArgVar {loc;v=id} ->
-    try try_interp_ltac_var (coerce_to_evaluable_ref env sigma) ist (Some (env,sigma)) (CAst.make ?loc id)
+    try try_interp_ltac_var (coerce_to_evaluable_ref env sigma) ist accessed_vars (Some (env,sigma)) (CAst.make ?loc id)
     with Not_found ->
       try try_interp_evaluable env (loc, id)
       with Not_found as exn ->
@@ -471,31 +492,31 @@ let interp_evaluable ist env sigma = function
         Nametab.error_global_not_found ~info (qualid_of_ident ?loc id)
 
 (* Interprets an hypothesis name *)
-let interp_occurrences ist occs =
-  Locusops.occurrences_map (interp_int_list ist) occs
+let interp_occurrences ist accessed_vars occs =
+  Locusops.occurrences_map (interp_int_list ist accessed_vars) occs
 
-let interp_occurrences_expr ist occs =
+let interp_occurrences_expr ist accessed_vars occs =
   (* XXX we should be able to delete this function
      but hyp clauses still use occurrences_expr *)
-  let occs = interp_occurrences ist occs in
+  let occs = interp_occurrences ist accessed_vars occs in
   Locusops.occurrences_map (List.map (fun x -> ArgArg x)) occs
 
-let interp_hyp_location ist env sigma ((occs,id),hl) =
-  ((interp_occurrences_expr ist occs,interp_hyp ist env sigma id),hl)
+let interp_hyp_location ist accessed_vars env sigma ((occs,id),hl) =
+  ((interp_occurrences_expr ist accessed_vars occs,interp_hyp ist accessed_vars env sigma id),hl)
 
-let interp_hyp_location_list_as_list ist env sigma ((occs,id),hl as x) =
+let interp_hyp_location_list_as_list ist accessed_vars env sigma ((occs,id),hl as x) =
   match occs,hl with
   | AllOccurrences,InHyp ->
       List.map (fun id -> ((AllOccurrences,id),InHyp))
-        (interp_hyp_list_as_list ist env sigma id)
-  | _,_ -> [interp_hyp_location ist env sigma x]
+        (interp_hyp_list_as_list ist accessed_vars env sigma id)
+  | _,_ -> [interp_hyp_location ist accessed_vars env sigma x]
 
-let interp_hyp_location_list ist env sigma l =
-  List.flatten (List.map (interp_hyp_location_list_as_list ist env sigma) l)
+let interp_hyp_location_list ist accessed_vars env sigma l =
+  List.flatten (List.map (interp_hyp_location_list_as_list ist accessed_vars env sigma) l)
 
-let interp_clause ist env sigma { onhyps=ol; concl_occs=occs } : clause =
-  { onhyps=Option.map (interp_hyp_location_list ist env sigma) ol;
-    concl_occs=interp_occurrences_expr ist occs }
+let interp_clause ist accessed_vars env sigma { onhyps=ol; concl_occs=occs } : clause =
+  { onhyps=Option.map (interp_hyp_location_list ist accessed_vars env sigma) ol;
+    concl_occs=interp_occurrences_expr ist accessed_vars occs }
 
 (* Interpretation of constructions *)
 
@@ -539,10 +560,10 @@ let extract_ids ids lfun accu =
 
 let default_fresh_id = Id.of_string "H"
 
-let interp_fresh_id ist env sigma l =
+let interp_fresh_id ist accessed_vars env sigma l =
   let extract_ident ist env sigma id =
     try try_interp_ltac_var (coerce_to_ident_not_fresh sigma)
-                            ist (Some (env,sigma)) (CAst.make id)
+                            ist accessed_vars (Some (env,sigma)) (CAst.make id)
     with Not_found -> id in
   let ids = List.map_filter (function ArgVar {v=id} -> Some id | _ -> None) l in
   let avoid = match TacStore.get ist.extra f_avoid_ids with
@@ -608,7 +629,7 @@ let interp_glob_closure ist env sigma ?(kind=WithoutTypeConstraint) ?(pattern_mo
 
 let interp_uconstr ist env sigma c = interp_glob_closure ist env sigma c
 
-let interp_gen kind ist pattern_mode flags env sigma c =
+let interp_gen kind ist accessed_vars pattern_mode flags env sigma c =
   let kind_for_intern = match kind with OfType _ -> WithoutTypeConstraint | _ -> kind in
   let { closure = constrvars ; term } =
     interp_glob_closure ist env sigma ~kind:kind_for_intern ~pattern_mode c in
@@ -652,9 +673,9 @@ let constr_flags () = {
 }
 
 (* Interprets a constr; expects evars to be solved *)
-let interp_constr_gen kind ist env sigma c =
+let interp_constr_gen kind ist accessed_vars env sigma c =
   let flags = { (constr_flags ()) with polymorphic = ist.Geninterp.poly } in
-  interp_gen kind ist false flags env sigma c
+  interp_gen kind ist accessed_vars false flags env sigma c
 
 let interp_constr = interp_constr_gen WithoutTypeConstraint
 
@@ -697,24 +718,24 @@ let pure_open_constr_flags = {
 }
 
 (* Interprets an open constr *)
-let interp_open_constr ?(expected_type=WithoutTypeConstraint) ?(flags=open_constr_no_classes_flags ()) ist env sigma c =
-  interp_gen expected_type ist false flags env sigma c
+let interp_open_constr ?(expected_type=WithoutTypeConstraint) ?(flags=open_constr_no_classes_flags ()) ist accessed_vars env sigma c =
+  interp_gen expected_type ist accessed_vars false flags env sigma c
 
-let interp_open_constr_with_classes ?(expected_type=WithoutTypeConstraint) ist env sigma c =
-  interp_gen expected_type ist false (open_constr_use_classes_flags ()) env sigma c
+let interp_open_constr_with_classes ?(expected_type=WithoutTypeConstraint) ist accessed_vars env sigma c =
+  interp_gen expected_type ist accessed_vars false (open_constr_use_classes_flags ()) env sigma c
 
-let interp_pure_open_constr ist =
-  interp_gen WithoutTypeConstraint ist false pure_open_constr_flags
+let interp_pure_open_constr ist accessed_vars =
+  interp_gen WithoutTypeConstraint ist accessed_vars false pure_open_constr_flags
 
-let interp_typed_pattern ist env sigma c =
+let interp_typed_pattern ist accessed_vars env sigma c =
   let sigma, c =
-    interp_gen WithoutTypeConstraint ist true pure_open_constr_flags env sigma c in
+    interp_gen WithoutTypeConstraint ist accessed_vars true pure_open_constr_flags env sigma c in
   (* FIXME: it is necessary to be unsafe here because of the way we handle
      evars in the pretyper. Sometimes they get solved eagerly. *)
   legacy_bad_pattern_of_constr env sigma c
 
 (* Interprets a constr expression *)
-let interp_constr_in_compound_list inj_fun dest_fun interp_fun ist env sigma l =
+let interp_constr_in_compound_list inj_fun dest_fun interp_fun ist accessed_vars env sigma l =
   let try_expand_ltac_var sigma x =
     try match DAst.get (fst (dest_fun x)) with
     | GVar id ->
@@ -724,22 +745,22 @@ let interp_constr_in_compound_list inj_fun dest_fun interp_fun ist env sigma l =
         raise Not_found
     with CannotCoerceTo _ | Not_found ->
       (* dest_fun, List.assoc may raise Not_found *)
-      let sigma, c = interp_fun ist env sigma x in
+      let sigma, c = interp_fun ist accessed_vars env sigma x in
       sigma, [c] in
   let sigma, l = List.fold_left_map try_expand_ltac_var sigma l in
   sigma, List.flatten l
 
-let interp_constr_list ist env sigma c =
-  interp_constr_in_compound_list (fun x -> x) (fun x -> x) interp_constr ist env sigma c
+let interp_constr_list ist accessed_vars env sigma c =
+  interp_constr_in_compound_list (fun x -> x) (fun x -> x) interp_constr ist accessed_vars env sigma c
 
 let interp_open_constr_list =
   interp_constr_in_compound_list (fun x -> x) (fun x -> x) interp_open_constr
 
-let interp_constr_with_occurrences ist env sigma (occs,c) =
-  let (sigma,c_interp) = interp_constr ist env sigma c in
-  sigma , (interp_occurrences ist occs, c_interp)
+let interp_constr_with_occurrences ist accessed_vars env sigma (occs,c) =
+  let (sigma,c_interp) = interp_constr ist accessed_vars env sigma c in
+  sigma , (interp_occurrences ist accessed_vars occs, c_interp)
 
-let interp_evaluable_or_pattern ist env sigma = function
+let interp_evaluable_or_pattern ist accessed_vars env sigma = function
   | ArgVar {loc;v=id} ->
       (* This is the encoding of an ltac var supposed to be bound
          prioritary to an evaluable reference and otherwise to a constr
@@ -749,62 +770,62 @@ let interp_evaluable_or_pattern ist env sigma = function
       with CannotCoerceTo _ ->
         let c = coerce_to_closed_constr env x in
         Inr (pattern_of_constr env sigma c) in
-    (try try_interp_ltac_var coerce_eval_ref_or_constr ist (Some (env,sigma)) (CAst.make ?loc id)
+    (try try_interp_ltac_var coerce_eval_ref_or_constr ist accessed_vars (Some (env,sigma)) (CAst.make ?loc id)
      with Not_found as exn ->
        let _, info = Exninfo.capture exn in
        Nametab.error_global_not_found ~info (qualid_of_ident ?loc id))
-  | ArgArg _ as b -> Inl (interp_evaluable ist env sigma b)
+  | ArgArg _ as b -> Inl (interp_evaluable ist accessed_vars env sigma b)
 
 let interp_constr_with_occurrences_and_name_as_list =
   interp_constr_in_compound_list
     (fun c -> ((AllOccurrences,c),Anonymous))
     (function ((occs,c),Anonymous) when occs == AllOccurrences -> c
       | _ -> raise Not_found)
-    (fun ist env sigma (occ_c,na) ->
-      let (sigma,c_interp) = interp_constr_with_occurrences ist env sigma occ_c in
+    (fun ist accessed_vars env sigma (occ_c,na) ->
+      let (sigma,c_interp) = interp_constr_with_occurrences ist accessed_vars env sigma occ_c in
       sigma, (c_interp,
-       interp_name ist env sigma na))
+       interp_name ist accessed_vars env sigma na))
 
-let interp_red_expr ist env sigma r =
+let interp_red_expr ist accessed_vars env sigma r =
   let ist = {
-    Redexpr.Interp.interp_occurrence_var = (fun x -> interp_int_list ist [ArgVar x]);
-    interp_constr = interp_constr ist;
-    interp_constr_list = (fun env sigma c -> interp_constr_list ist env sigma [c]);
-    interp_evaluable = interp_evaluable ist;
-    interp_pattern = interp_typed_pattern ist;
-    interp_evaluable_or_pattern = interp_evaluable_or_pattern ist;
+    Redexpr.Interp.interp_occurrence_var = (fun x -> interp_int_list ist accessed_vars [ArgVar x]);
+    interp_constr = interp_constr ist accessed_vars;
+    interp_constr_list = (fun env sigma c -> interp_constr_list ist accessed_vars env sigma [c]);
+    interp_evaluable = interp_evaluable ist accessed_vars;
+    interp_pattern = interp_typed_pattern ist accessed_vars;
+    interp_evaluable_or_pattern = interp_evaluable_or_pattern ist accessed_vars;
   }
   in
   Redexpr.Interp.interp_red_expr ist env sigma r
 
-let interp_strategy ist _env _sigma s =
-  let interp_redexpr r = fun env sigma -> interp_red_expr ist env sigma r in
-  let interp_constr c = (fst c, fun env sigma -> interp_open_constr ist env sigma c) in
+let interp_strategy ist accessed_vars _env _sigma s =
+  let interp_redexpr r = fun env sigma -> interp_red_expr ist accessed_vars env sigma r in
+  let interp_constr c = (fst c, fun env sigma -> interp_open_constr ist accessed_vars env sigma c) in
   let s = Rewrite.map_strategy interp_constr interp_redexpr (fun x -> x) s in
   Rewrite.strategy_of_ast s
 
-let interp_may_eval f ist env sigma = function
+let interp_may_eval f ist accessed_vars env sigma = function
   | ConstrEval (r,c) ->
-      let (sigma,redexp) = interp_red_expr ist env sigma r in
-      let (sigma,c_interp) = f ist env sigma c in
+      let (sigma,redexp) = interp_red_expr ist accessed_vars env sigma r in
+      let (sigma,c_interp) = f ist accessed_vars env sigma c in
       let (redfun, _) = Redexpr.reduction_of_red_expr env redexp in
       redfun env sigma c_interp
   | ConstrContext ({loc;v=s},c) ->
-    let (sigma,ic) = f ist env sigma c in
+    let (sigma,ic) = f ist accessed_vars env sigma c in
     let ctxt =
-      try try_interp_ltac_var coerce_to_constr_context ist (Some (env, sigma)) (CAst.make ?loc s)
+      try try_interp_ltac_var coerce_to_constr_context ist accessed_vars (Some (env, sigma)) (CAst.make ?loc s)
       with Not_found ->
         user_err ?loc (str "Unbound context identifier" ++ Id.print s ++ str".")
     in
     let c = Constr_matching.instantiate_context ctxt ic in
     Typing.solve_evars env sigma c
   | ConstrTypeOf c ->
-      let (sigma,c_interp) = f ist env sigma c in
+      let (sigma,c_interp) = f ist accessed_vars env sigma c in
       let (sigma, t) = Typing.type_of ~refresh:true env sigma c_interp in
       (sigma, t)
   | ConstrTerm c ->
      try
-        f ist env sigma c
+        f ist accessed_vars env sigma c
      with reraise ->
        let reraise = Exninfo.capture reraise in
        (* spiwack: to avoid unnecessary modifications of tacinterp, as this
@@ -815,10 +836,10 @@ let interp_may_eval f ist env sigma = function
        Exninfo.iraise reraise
 
 (* Interprets a constr expression possibly to first evaluate *)
-let interp_constr_may_eval ist env sigma c =
+let interp_constr_may_eval ist accessed_vars env sigma c =
   let (sigma,csr) =
     try
-      interp_may_eval interp_constr ist env sigma c
+      interp_may_eval interp_constr ist accessed_vars env sigma c
     with reraise ->
       let reraise = Exninfo.capture reraise in
       (* spiwack: to avoid unnecessary modifications of tacinterp, as this
@@ -863,113 +884,113 @@ let interp_message_ftactic ist l =
 let interp_message ist tac k =
   Ftactic.run (interp_message_ftactic ist tac) k
 
-let rec interp_intro_pattern ist env sigma = with_loc_val (fun ?loc -> function
+let rec interp_intro_pattern ist accessed_vars env sigma = with_loc_val (fun ?loc -> function
   | IntroAction pat ->
-    let pat = interp_intro_pattern_action ist env sigma pat in
+    let pat = interp_intro_pattern_action ist accessed_vars env sigma pat in
     CAst.make ?loc @@ IntroAction pat
   | IntroNaming (IntroIdentifier id) ->
-    CAst.make ?loc @@ interp_intro_pattern_var loc ist env sigma id
+    CAst.make ?loc @@ interp_intro_pattern_var loc ist accessed_vars env sigma id
   | IntroNaming pat ->
-    CAst.make ?loc @@ IntroNaming (interp_intro_pattern_naming loc ist env sigma pat)
+    CAst.make ?loc @@ IntroNaming (interp_intro_pattern_naming loc ist accessed_vars env sigma pat)
   | IntroForthcoming _  as x -> CAst.make ?loc x)
 
-and interp_intro_pattern_naming loc ist env sigma = function
-  | IntroFresh id -> IntroFresh (interp_ident ist env sigma id)
-  | IntroIdentifier id -> interp_intro_pattern_naming_var loc ist env sigma id
+and interp_intro_pattern_naming loc ist accessed_vars env sigma = function
+  | IntroFresh id -> IntroFresh (interp_ident ist accessed_vars env sigma id)
+  | IntroIdentifier id -> interp_intro_pattern_naming_var loc ist accessed_vars env sigma id
   | IntroAnonymous as x -> x
 
-and interp_intro_pattern_action ist env sigma = function
+and interp_intro_pattern_action ist accessed_vars env sigma = function
   | IntroOrAndPattern l ->
-      let l = interp_or_and_intro_pattern ist env sigma l in
+      let l = interp_or_and_intro_pattern ist accessed_vars env sigma l in
       IntroOrAndPattern l
   | IntroInjection l ->
-      let l = interp_intro_pattern_list_as_list ist env sigma l in
+      let l = interp_intro_pattern_list_as_list ist accessed_vars env sigma l in
       IntroInjection l
   | IntroApplyOn ({loc;v=c},ipat) ->
       let default = GenArg (Glbwit wit_constr, c) in
-      let c env sigma = interp_open_constr ist env sigma c in
-      let ipat = interp_intro_pattern ist env sigma ipat in
+      let c env sigma = interp_open_constr ist accessed_vars env sigma c in
+      let ipat = interp_intro_pattern ist accessed_vars env sigma ipat in
       IntroApplyOn (CAst.make ?loc (prepare_named_delayed_open wit_dconstr ~default c),ipat)
   | IntroWildcard | IntroRewrite _ as x -> x
 
-and interp_or_and_intro_pattern ist env sigma = function
+and interp_or_and_intro_pattern ist accessed_vars env sigma = function
   | IntroAndPattern l ->
-      let l = List.map (interp_intro_pattern ist env sigma) l in
+      let l = List.map (interp_intro_pattern ist accessed_vars env sigma) l in
       IntroAndPattern l
   | IntroOrPattern ll ->
-      let ll = List.map (interp_intro_pattern_list_as_list ist env sigma) ll in
+      let ll = List.map (interp_intro_pattern_list_as_list ist accessed_vars env sigma) ll in
       IntroOrPattern ll
 
-and interp_intro_pattern_list_as_list ist env sigma = function
+and interp_intro_pattern_list_as_list ist accessed_vars env sigma = function
   | [{loc;v=IntroNaming (IntroIdentifier id)}] as l ->
       (try coerce_to_intro_pattern_list ?loc sigma (Id.Map.find id ist.lfun |> clone)
        with Not_found | CannotCoerceTo _ ->
-         List.map (interp_intro_pattern ist env sigma) l)
-  | l -> List.map (interp_intro_pattern ist env sigma) l
+         List.map (interp_intro_pattern ist accessed_vars env sigma) l)
+  | l -> List.map (interp_intro_pattern ist accessed_vars env sigma) l
 
-let interp_intro_pattern_naming_option ist env sigma = function
+let interp_intro_pattern_naming_option ist accessed_vars env sigma = function
   | None -> None
-  | Some lpat -> Some (map_with_loc (fun ?loc pat -> interp_intro_pattern_naming loc ist env sigma pat) lpat)
+  | Some lpat -> Some (map_with_loc (fun ?loc pat -> interp_intro_pattern_naming loc ist accessed_vars env sigma pat) lpat)
 
-let interp_or_and_intro_pattern_option ist env sigma = function
+let interp_or_and_intro_pattern_option ist accessed_vars env sigma = function
   | None -> None
   | Some (ArgVar {loc;v=id}) ->
-      (match interp_intro_pattern_var loc ist env sigma id with
+      (match interp_intro_pattern_var loc ist accessed_vars env sigma id with
       | IntroAction (IntroOrAndPattern l) -> Some (CAst.make ?loc l)
       | _ ->
         user_err ?loc (str "Cannot coerce to a disjunctive/conjunctive pattern."))
   | Some (ArgArg {loc;v=l}) ->
-      let l = interp_or_and_intro_pattern ist env sigma l in
+      let l = interp_or_and_intro_pattern ist accessed_vars env sigma l in
       Some (CAst.make ?loc l)
 
-let interp_intro_pattern_option ist env sigma = function
+let interp_intro_pattern_option ist accessed_vars env sigma = function
   | None -> None
   | Some ipat ->
-      let ipat = interp_intro_pattern ist env sigma ipat in
+      let ipat = interp_intro_pattern ist accessed_vars env sigma ipat in
       Some ipat
 
-let interp_in_hyp_as ist env sigma (id,ipat) =
-  let ipat = interp_intro_pattern_option ist env sigma ipat in
-  (interp_hyp ist env sigma id,ipat)
+let interp_in_hyp_as ist accessed_vars env sigma (id,ipat) =
+  let ipat = interp_intro_pattern_option ist accessed_vars env sigma ipat in
+  (interp_hyp ist accessed_vars env sigma id,ipat)
 
-let interp_binding_name ist env sigma = function
+let interp_binding_name ist accessed_vars env sigma = function
   | AnonHyp n -> AnonHyp n
   | NamedHyp id ->
       (* If a name is bound, it has to be a quantified hypothesis *)
       (* user has to use other names for variables if these ones clash with *)
       (* a name intended to be used as a (non-variable) identifier *)
-      try try_interp_ltac_var (coerce_to_quantified_hypothesis sigma) ist (Some (env,sigma)) id
+      try try_interp_ltac_var (coerce_to_quantified_hypothesis sigma) ist accessed_vars (Some (env,sigma)) id
       with Not_found -> NamedHyp id
 
-let interp_declared_or_quantified_hypothesis ist env sigma = function
+let interp_declared_or_quantified_hypothesis ist accessed_vars env sigma = function
   | AnonHyp n -> AnonHyp n
   | NamedHyp id ->
       try try_interp_ltac_var
-            (coerce_to_decl_or_quant_hyp sigma) ist (Some (env,sigma)) id
+            (coerce_to_decl_or_quant_hyp sigma) ist accessed_vars (Some (env,sigma)) id
       with Not_found -> NamedHyp id
 
-let interp_binding ist env sigma {loc;v=(b,c)} =
-  let sigma, c = interp_open_constr ist env sigma c in
-  sigma, (CAst.make ?loc (interp_binding_name ist env sigma b,c))
+let interp_binding ist accessed_vars env sigma {loc;v=(b,c)} =
+  let sigma, c = interp_open_constr ist accessed_vars env sigma c in
+  sigma, (CAst.make ?loc (interp_binding_name ist accessed_vars env sigma b,c))
 
-let interp_bindings ist env sigma = function
+let interp_bindings ist accessed_vars env sigma = function
 | NoBindings ->
     sigma, NoBindings
 | ImplicitBindings l ->
-    let sigma, l = interp_open_constr_list ist env sigma l in
+    let sigma, l = interp_open_constr_list ist accessed_vars env sigma l in
     sigma, ImplicitBindings l
 | ExplicitBindings l ->
-    let sigma, l = List.fold_left_map (interp_binding ist env) sigma l in
+    let sigma, l = List.fold_left_map (interp_binding ist accessed_vars env) sigma l in
     sigma, ExplicitBindings l
 
-let interp_constr_with_bindings ist env sigma (c,bl) =
-  let sigma, bl = interp_bindings ist env sigma bl in
-  let sigma, c = interp_constr ist env sigma c in
+let interp_constr_with_bindings ist accessed_vars env sigma (c,bl) =
+  let sigma, bl = interp_bindings ist accessed_vars env sigma bl in
+  let sigma, c = interp_constr ist accessed_vars env sigma c in
   sigma, (c,bl)
 
-let interp_open_constr_with_bindings ist env sigma (c,bl) =
-  let sigma, bl = interp_bindings ist env sigma bl in
-  let sigma, c = interp_open_constr ist env sigma c in
+let interp_open_constr_with_bindings ist accessed_vars env sigma (c,bl) =
+  let sigma, bl = interp_bindings ist accessed_vars env sigma bl in
+  let sigma, c = interp_open_constr ist accessed_vars env sigma c in
   sigma, (c, bl)
 
 let loc_of_bindings = function
@@ -977,19 +998,19 @@ let loc_of_bindings = function
 | ImplicitBindings l -> loc_of_glob_constr (fst (List.last l))
 | ExplicitBindings l -> (List.last l).loc
 
-let interp_open_constr_with_bindings_loc ist ((c,_),bl as cb) =
+let interp_open_constr_with_bindings_loc ist accessed_vars ((c,_),bl as cb) =
   let loc1 = loc_of_glob_constr c in
   let loc2 = loc_of_bindings bl in
   let loc  = Loc.merge_opt loc1 loc2 in
-  let f env sigma = interp_open_constr_with_bindings ist env sigma cb in
+  let f env sigma = interp_open_constr_with_bindings ist accessed_vars env sigma cb in
   (loc,f)
 
-let interp_destruction_arg ist gl arg =
+let interp_destruction_arg ist accessed_vars gl arg =
   let default = GenArg (Glbwit wit_destruction_arg, arg) in
   match arg with
   | keep,ElimOnConstr c ->
       keep,ElimOnConstr (prepare_named_delayed_open wit_open_constr_with_bindings ~default begin fun env sigma ->
-        interp_open_constr_with_bindings ist env sigma c
+        interp_open_constr_with_bindings ist accessed_vars env sigma c
       end)
   | keep,ElimOnAnonHyp n as x -> x
   | keep,ElimOnIdent {loc;v=id} ->
@@ -1031,7 +1052,7 @@ let interp_destruction_arg ist gl arg =
         else
           let c = (DAst.make ?loc @@ GVar id,Some (CAst.make @@ CRef (qualid_of_ident ?loc id,None))) in
           let f env sigma =
-            let (sigma,c) = interp_open_constr ist env sigma c in
+            let (sigma,c) = interp_open_constr ist accessed_vars env sigma c in
             (sigma, (c,NoBindings))
           in
           keep,ElimOnConstr (prepare_named_delayed_open wit_open_constr_with_bindings ~default f)
@@ -1098,17 +1119,34 @@ let type_uconstr ?(flags = (constr_flags ()))
   end
 
 let tag_print_gen lfun k t =
+  Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let old_used_vars = Evd.Store.get store f_used_vars |> Option.default Id.Set.empty in
+  let store = Evd.Store.set store f_used_vars Id.Set.empty in
+  let sigma = Evd.set_extra_data store sigma in
+  Proofview.Unsafe.tclEVARS sigma <*>
+  let old_sigma = sigma in
+  Proofview.Trace.tag_new_deferred_contents (fun deferred_id ->
+    t >>= fun r ->
+    Proofview.tclUNIT (deferred_id, r)
+  ) >>= fun (deferred_id, r) ->
   Proofview.tclENV >>= fun env ->
   Proofview.tclEVARMAP >>= fun sigma ->
+  let store = Evd.get_extra_data sigma in
+  let new_used_vars = Evd.Store.get store f_used_vars |> Option.default Id.Set.empty in
+  let store = Evd.Store.set store f_used_vars (Id.Set.union old_used_vars new_used_vars) in
+  let sigma = Evd.set_extra_data store sigma in
+  Proofview.Unsafe.tclEVARS sigma <*>
   Proofview.Trace.tag_tactic
     k
     (fun () ->
-      Pputils.pr_glb_generic env sigma None (GenArg (
+      Pputils.pr_glb_generic env old_sigma None (GenArg (
         Glbwit wit_tacvalue,
-        VFun (UnnamedAppl, ([], []), None, lfun, [], glob_late_arg_tac print_late_arg)
+        VFun (UnnamedAppl, ([], []), None, lfun |> Id.Map.filter (fun id _ -> new_used_vars |> Id.Set.mem id), [], glob_late_arg_tac print_late_arg)
       ))
     )
-    t
+    (Proofview.Trace.deferred_placeholder deferred_id) <*>
+  Proofview.tclUNIT r
 
 let f_last_lfun : value Id.Map.t Evd.Store.field = Evd.Store.field "last_lfun"
 
@@ -2401,7 +2439,7 @@ let lift wit f = (); fun deferred_id ist x ->
     Ftactic.enter (fun gl ->
       let env = Proofview.Goal.env gl in
       let sigma = Proofview.Goal.sigma gl in
-      let v = f ist env sigma x in
+      let v = f ist accessed_vars env sigma x in
       populate_current_late_arg ist (CAst.make (TacArg (TacGeneric (None, GenArg (glbwit wit_value, Taccoerce.in_gen (topwit wit) v))))) <*>
       tag_print ist (Proofview_monad.Info.Builtin (Genarg.pr_argument_type (ArgumentType wit))) @@
         Ftactic.lift Proofview.Trace.new_deferred_placeholder >>= fun deferred_id ->
@@ -2415,7 +2453,7 @@ let lifts wit f = (); fun deferred_id ist x ->
     Ftactic.enter (fun gl ->
       let env = Proofview.Goal.env gl in
       let sigma = Proofview.Goal.sigma gl in
-      let (sigma, v) = f ist env sigma x in
+      let (sigma, v) = f ist accessed_vars env sigma x in
       Proofview.Unsafe.tclEVARS sigma <*>
       (* FIXME once we don't need to catch side effects *)
       Proofview.Unsafe.tclSETENV (Global.env()) <*>
@@ -2477,8 +2515,8 @@ let interp_destruction_arg' deferred_id ist c =
     )
   )
 
-let interp_pre_ident ist env sigma s =
-  s |> Id.of_string |> interp_ident ist env sigma |> Id.to_string
+let interp_pre_ident ist accessed_vars env sigma s =
+  s |> Id.of_string |> interp_ident ist accessed_vars env sigma |> Id.to_string
 
 let () =
   register_interp0 wit_int_or_var (fun deferred_id ist n ->
