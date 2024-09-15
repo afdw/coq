@@ -75,6 +75,56 @@ struct
 
   let hcons = String.hcons
 
+  module TracedMap = struct
+    type key = t
+    type 'a t = ('a * bool GenRef.t ref) Map.t
+
+    let mark (x, r) =
+      GenRef.set !r true;
+      x
+
+    let remember m =
+      m |> Map.map (fun x -> (x, ref (GenRef.ref false)))
+
+    let forget m =
+      m |> Map.map fst
+
+    let marked m =
+      m |> Map.filter_map (fun _ (x, r) -> if GenRef.get !r then Some x else None)
+
+    let mark_all m =
+      m |> Map.map mark
+
+    let freeze m =
+      m |> Map.map (fun (x, r) -> (x, ref (GenRef.const (GenRef.get !r))))
+
+    let empty = Map.empty
+
+    let add k x m =
+      m |> Map.add k (x, ref (GenRef.ref false))
+
+    let merge f m1 m2 =
+      Map.merge (fun k p1 p2 ->
+        match p1, p2 with
+        | None, None -> f k None None |> Option.map (fun x -> (x, ref (GenRef.ref false)))
+        | None, Some (x2, r2) -> f k None (Some x2) |> Option.map (fun x -> (x, r2))
+        | Some (x1, r1), None -> f k (Some x1) None |> Option.map (fun x -> (x, r1))
+        | Some (x1, r1), Some (x2, r2) -> f k (Some x1) (Some x2) |> Option.map (fun x -> (x, ref (GenRef.combine (||) !r1 !r2)))
+      ) m1 m2
+
+    let find k m =
+      m |> Map.find k |> mark
+
+    let find_opt k m =
+      m |> Map.find_opt k |> Option.map mark
+
+    let map f m =
+      m |> Map.map (fun (x, r) -> (f x, r))
+
+    let get k m =
+      m |> Map.get k |> mark
+  end
+
 end
 
 (** Representation and operations on identifiers that are allowed to be anonymous

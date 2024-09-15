@@ -69,7 +69,7 @@ end
 module TacStore : Store.S
 
 type interp_sign =
-  { lfun : Val.t Id.Map.t
+  { lfun : Val.t Id.TracedMap.t
   ; poly : bool
   ; extra : TacStore.t }
 

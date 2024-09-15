@@ -715,7 +715,7 @@ let lift_constr_tac_to_ml_tac ml vars tac =
           match args_arg_late_args with
           | [] -> tac (List.rev values) ist
           | (arg, arg_late_arg) :: args_arg_late_args' ->
-            let c = Id.Map.find arg ist.Geninterp.lfun in
+            let c = Id.TracedMap.find arg ist.Geninterp.lfun in
             let c_constr =
               try Taccoerce.coerce_to_closed_constr env c
               with Taccoerce.CannotCoerceTo ty ->
@@ -850,7 +850,7 @@ let in_tacval =
   (* No need to register a value tag for it via register_val0 since we will
      never access this genarg directly. *)
   let interp_fun deferred_id ist tac =
-    let args = List.map (fun id -> Id.Map.get id ist.Geninterp.lfun) tac.tacval_var in
+    let args = List.map (fun id -> Id.TracedMap.get id ist.Geninterp.lfun) tac.tacval_var in
     let tac = MLTacMap.get tac.tacval_tac !ml_table in
     tac deferred_id args
   in

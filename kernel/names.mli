@@ -79,6 +79,28 @@ sig
   val hcons : t -> t
   (** Hashconsing of identifiers. *)
 
+  module TracedMap :
+  sig
+    type key = t
+    type 'a t = ('a * bool GenRef.t ref) Map.t
+
+    val mark : ('a * bool GenRef.t ref) -> 'a
+
+    val remember : 'a Map.t -> 'a t
+    val forget : 'a t -> 'a Map.t
+    val marked : 'a t -> 'a Map.t
+    val mark_all : 'a t -> 'a Map.t
+    val freeze : 'a t -> 'a t
+
+    val empty : 'a t
+    val add : key -> 'a -> 'a t -> 'a t
+    val merge : (key -> 'a option -> 'b option -> 'c option) -> 'a t -> 'b t -> 'c t
+    val find : key -> 'a t -> 'a
+    val find_opt : key -> 'a t -> 'a option
+    val map : ('a -> 'b) -> 'a t -> 'b t
+    val get : key -> 'a t -> 'a
+  end
+
 end
 
 (** Representation and operations on identifiers that are allowed to be anonymous

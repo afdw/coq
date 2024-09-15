@@ -26,7 +26,7 @@ let tauto_plugin = "coq-core.plugins.tauto"
 let () = Mltop.add_known_module tauto_plugin
 
 let assoc_var s ist =
-  let v = Id.Map.find (Names.Id.of_string s) ist.lfun in
+  let v = Id.TracedMap.find (Names.Id.of_string s) ist.lfun in
   match Value.to_constr v with
     | Some c -> c
     | None -> failwith "tauto: anomaly"
@@ -54,7 +54,7 @@ type tauto_flags = {
 let tag_tauto_flags : tauto_flags Val.typ = Val.create "tauto_flags"
 
 let assoc_flags ist : tauto_flags =
-  let Val.Dyn (tag, v) = Id.Map.find (Names.Id.of_string "tauto_flags") ist.lfun in
+  let Val.Dyn (tag, v) = Id.TracedMap.find (Names.Id.of_string "tauto_flags") ist.lfun in
   match Val.eq tag tag_tauto_flags with
   | None -> assert false
   | Some Refl -> v
@@ -222,7 +222,7 @@ let with_flags flags _ ist =
   let f = CAst.make @@ Id.of_string "f" in
   let x = CAst.make @@ Id.of_string "x" in
   let arg = Val.Dyn (tag_tauto_flags, flags) in
-  let ist = { ist with lfun = Id.Map.add x.CAst.v arg ist.lfun } in
+  let ist = { ist with lfun = Id.TracedMap.add x.CAst.v arg ist.lfun } in
   eval_tactic_ist ist (CAst.make @@ TacArg (TacCall (CAst.make (Locus.ArgVar f, [Reference (Locus.ArgVar x)]))))
 
 let warn_auto_with_star = CWarnings.create ~name:"intuition-auto-with-star" ~category:Deprecation.Version.v8_17
@@ -244,7 +244,7 @@ let val_of_id id =
   Val.inject (val_tag @@ Genarg.topwit Tacarg.wit_intro_pattern) id
 
 let find_cut _ ist =
-  let k = Id.Map.find (Names.Id.of_string "k") ist.lfun in
+  let k = Id.TracedMap.find (Names.Id.of_string "k") ist.lfun in
   Proofview.Goal.enter begin fun gl ->
   let sigma = Proofview.Goal.sigma gl in
   let hyps0 = Proofview.Goal.hyps gl in

@@ -793,14 +793,14 @@ let e_change_in_hyps ~check ~reorder f args = match args with
           context, then we can perform it in parallel. *)
       let fold accu arg =
         let (id, redfun) = f arg in
-        let old = try Id.Map.find id accu with Not_found -> [] in
-        Id.Map.add id (redfun :: old) accu
+        let old = try Id.TracedMap.find id accu with Not_found -> [] in
+        Id.TracedMap.add id (redfun :: old) accu
       in
       let reds = List.fold_left fold Id.Map.empty args in
       let evdref = ref sigma in
       let map d =
         let id = NamedDecl.get_id d in
-        match Id.Map.find id reds with
+        match Id.TracedMap.find id reds with
         | reds ->
           let d = EConstr.of_named_decl d in
           let fold redfun (sigma, d) = redfun env sigma d in
@@ -860,7 +860,7 @@ let reduct_option ~check (redfun, sty) where =
 
 type change_arg = Ltac_pretype.patvar_map -> env -> evar_map -> evar_map * EConstr.constr
 
-let make_change_arg c pats env sigma = (sigma, replace_vars sigma (Id.Map.bindings pats) c)
+let make_change_arg c pats env sigma = (sigma, replace_vars sigma (Id.Map.bindings (pats |> Id.TracedMap.mark_all)) c)
 
 let check_types env sigma mayneedglobalcheck deep newc origc =
   let t1 = Retyping.get_type_of env sigma newc in

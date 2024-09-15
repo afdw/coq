@@ -58,7 +58,7 @@ let vars_of_env env =
   Id.Set.union (Id.Map.domain env.lvar.ltac_genargs) (vars_of_env env.static_env)
 
 let ltac_interp_id { ltac_idents ; ltac_genargs } id =
-  try Id.Map.find id ltac_idents
+  try Id.TracedMap.find id ltac_idents
   with Not_found ->
     if Id.Map.mem id ltac_genargs then
       user_err (str "Ltac variable" ++ spc () ++ Id.print id ++
@@ -143,13 +143,13 @@ let invert_ltac_bound_name env id0 id =
 let interp_ltac_variable ?loc typing_fun env sigma id : Evd.evar_map * unsafe_judgment =
   (* Check if [id] is an ltac variable *)
   try
-    let (ids,c) = Id.Map.find id env.lvar.ltac_constrs in
+    let (ids,c) = Id.TracedMap.find id env.lvar.ltac_constrs in
     let subst = List.map (invert_ltac_bound_name env id) ids in
     let c = substl subst c in
     sigma, { uj_val = c; uj_type = Retyping.reinterpret_get_type_of ~src:id env.renamed_env sigma c }
   with Not_found ->
   try
-    let {closure;term} = Id.Map.find id env.lvar.ltac_uconstrs in
+    let {closure;term} = Id.TracedMap.find id env.lvar.ltac_uconstrs in
     let lvar = {
       ltac_constrs = closure.typed;
       ltac_uconstrs = closure.untyped;
@@ -165,13 +165,13 @@ let interp_ltac_variable ?loc typing_fun env sigma id : Evd.evar_map * unsafe_ju
   (* Check if [id] is a ltac variable not bound to a term *)
   (* and build a nice error message *)
   if Id.Map.mem id env.lvar.ltac_genargs then begin
-    let Geninterp.Val.Dyn (typ, _) = Id.Map.find id env.lvar.ltac_genargs in
+    let Geninterp.Val.Dyn (typ, _) = Id.TracedMap.find id env.lvar.ltac_genargs in
     user_err ?loc
      (str "Variable " ++ Id.print id ++ str " should be bound to a term but is \
       bound to a " ++ Geninterp.Val.pr typ ++ str ".")
   end;
   if Id.Map.mem id env.lvar.ltac_idents then begin
-    let bnd = Id.Map.find id env.lvar.ltac_idents in
+    let bnd = Id.TracedMap.find id env.lvar.ltac_idents in
     user_err ?loc
      (str "Variable " ++ Id.print id ++ str " should be bound to a term but is \
       bound to the identifier " ++ quote (Id.print bnd) ++ str ".")

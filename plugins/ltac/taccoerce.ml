@@ -494,16 +494,16 @@ type tacvalue =
       appl *
       Tacexpr.ltac_trace *
       Loc.t option * (* when executing a global Ltac function: the location where this function was called *)
-      Val.t Id.Map.t * (* closure *)
+      Val.t Id.TracedMap.t * (* closure *)
       Name.t list * (* binders *)
       Tacexpr.glob_tactic_expr (* body *)
-  | VRec of Val.t Id.Map.t ref * Tacexpr.glob_tactic_expr
+  | VRec of Val.t Id.TracedMap.t ref * Tacexpr.glob_tactic_expr
 
 let (wit_tacvalue : (Empty.t, tacvalue, tacvalue) Genarg.genarg_type) =
   let wit = Genarg.create_arg "tacvalue" in
   register_val0 wit None;
   let pr_lfun env sigma lfun =
-    Id.Map.bindings lfun
+    Id.Map.bindings (lfun |> Id.TracedMap.marked)
       |> List.map_i (fun i (name, value) ->
         hov 2 (
           Id.print name ++ str " :" ++ spc () ++ pr_argument_type value ++ str " :=" ++ spc () ++

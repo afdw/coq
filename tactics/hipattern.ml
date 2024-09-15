@@ -340,7 +340,7 @@ let match_arrow_pattern env sigma t =
   let result = matches env sigma coq_arrow_pattern t in
   match Id.Map.bindings result with
     | [(m1,arg);(m2,mind)] ->
-      assert (Id.equal m1 meta1 && Id.equal m2 meta2); (arg, mind)
+      assert (Id.equal m1 meta1 && Id.equal m2 meta2); (arg |> Id.TracedMap.mark, mind |> Id.TracedMap.mark)
     | _ -> anomaly (Pp.str "Incorrect pattern matching.")
 
 let match_with_imp_term env sigma c =
@@ -487,7 +487,7 @@ let coq_sig_pattern =
 
 let match_sigma env sigma t =
   match Id.Map.bindings (matches env sigma (Lazy.force coq_sig_pattern) t) with
-    | [(_,a); (_,p)] -> (a,p)
+    | [(_,a); (_,p)] -> (a |> Id.TracedMap.mark,p |> Id.TracedMap.mark)
     | _ -> anomaly (Pp.str "Unexpected pattern.")
 
 let is_matching_sigma env sigma t = is_matching env sigma (Lazy.force coq_sig_pattern) t
@@ -533,7 +533,7 @@ let match_eqdec env sigma t =
         false,or_type,matches env sigma (Lazy.force coq_eqdec_rev_pattern) t in
   match Id.Map.bindings subst with
   | [(_,typ);(_,c1);(_,c2)] ->
-      eqonleft, lib_ref op, c1, c2, typ
+      eqonleft, lib_ref op, c1 |> Id.TracedMap.mark, c2 |> Id.TracedMap.mark, typ |> Id.TracedMap.mark
   | _ -> anomaly (Pp.str "Unexpected pattern.")
 
 (* Patterns "~ ?" and "? -> False" *)

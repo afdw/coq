@@ -1094,7 +1094,7 @@ let detype_rel_context d where avoid env sigma sign =
 
 let detype_closed_glob ?isgoal avoid env sigma t =
   let convert_id cl id =
-    try Id.Map.find id cl.idents
+    try Id.TracedMap.find id cl.idents
     with Not_found -> id
   in
   let convert_name cl = function
@@ -1105,11 +1105,11 @@ let detype_closed_glob ?isgoal avoid env sigma t =
     | GVar id ->
         (* if [id] is bound to a name. *)
         begin try
-          GVar(Id.Map.find id cl.idents)
+          GVar(Id.TracedMap.find id cl.idents)
         (* if [id] is bound to a typed term *)
         with Not_found -> try
           (* assumes [detype] does not raise [Not_found] exceptions *)
-          let (b,c) = Id.Map.find id cl.typed in
+          let (b,c) = Id.TracedMap.find id cl.typed in
           (* spiwack: I'm not sure it is the right thing to do,
              but I'm computing the detyping environment like
              [Printer.pr_constr_under_binders_env] does. *)
@@ -1118,7 +1118,7 @@ let detype_closed_glob ?isgoal avoid env sigma t =
           DAst.get (detype Now ?isgoal avoid env sigma c)
         (* if [id] is bound to a [closed_glob_constr]. *)
         with Not_found -> try
-          let {closure;term} = Id.Map.find id cl.untyped in
+          let {closure;term} = Id.TracedMap.find id cl.untyped in
           DAst.get (detype_closed_glob closure term)
         (* Otherwise [id] stands for itself *)
         with Not_found ->

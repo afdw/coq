@@ -114,7 +114,7 @@ let interp_occs ist env sigma l =
   match l with
     | ArgArg x -> x
     | ArgVar ({ CAst.v = id } as locid) ->
-        (try int_list_of_VList (Id.Map.find id ist.lfun)
+        (try int_list_of_VList (Id.TracedMap.find id ist.lfun)
           with Not_found | CannotCoerceTo _ -> [interp_int ist locid])
 
 let glob_occs ist l = l
@@ -334,7 +334,7 @@ let interp_strategy ist env sigma = function
 | ArgArg n -> n
 | ArgVar { CAst.v = id; CAst.loc } ->
   let v =
-    try Id.Map.find id ist.lfun
+    try Id.TracedMap.find id ist.lfun
     with Not_found ->
       CErrors.user_err ?loc
         (str "Unbound variable " ++ Id.print id ++ str".")
