@@ -94,3 +94,4 @@ let tracing_sub_suffix = ref "unknown"
 let tracing_compress = ref false
 let tracing_low_level = ref false
 let tracing_no_event = ref false
+let tracing_do_not_filter_event = ref false

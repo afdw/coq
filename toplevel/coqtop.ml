@@ -81,6 +81,7 @@ let start_coq custom =
   Flags.tracing_compress := Sys.getenv_opt "TRACING_COMPRESS" |> Option.has_some;
   Flags.tracing_low_level := Sys.getenv_opt "TRACING_LOW_LEVEL" |> Option.has_some;
   Flags.tracing_no_event := Sys.getenv_opt "TRACING_NO_EVENT" |> Option.has_some;
+  Flags.tracing_do_not_filter_event := Sys.getenv_opt "TRACING_DO_NOT_FILTER_EVENT" |> Option.has_some;
   at_exit (fun () ->
     if !ComDefinition.current_name |> Option.has_some then
       ComDefinition.end_proof ComDefinition.Declaration.Fail;

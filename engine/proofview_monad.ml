@@ -232,6 +232,144 @@ module Info = struct
     | Dispatch (saved_proofview_before, brs) -> Dispatch (saved_proofview_before, brs |> List.map (collapse n))
     | Tactic (saved_proofview_before, saved_proofview_after, kind, m, c) -> if n > 0 then collapse (n - 1) c else Tactic (saved_proofview_before, saved_proofview_after, kind, m, Sequence [])
     | Message m -> Message m
+
+  let rec force_tactic_kinds = function
+  | Sequence brs -> Sequence (brs |> List.map force_tactic_kinds)
+  | Dispatch (saved_proofview_before, brs) -> Dispatch (saved_proofview_before, brs |> List.map force_tactic_kinds)
+  | Tactic (saved_proofview_before, saved_proofview_after, kind, m, c) ->
+    let kind =
+      match kind with
+      | Primitive s -> Primitive (Ppcmd_string (s |> Pp.simple_string_of_ppcmds))
+      | Builtin s -> Builtin (Ppcmd_string (s |> Pp.simple_string_of_ppcmds))
+      | Alias s -> Alias (Ppcmd_string (s |> Pp.simple_string_of_ppcmds))
+      | ML s -> ML (Ppcmd_string (s |> Pp.simple_string_of_ppcmds)) in
+    Tactic (saved_proofview_before, saved_proofview_after, kind, m, c)
+  | Message m -> Message m
+
+  let ignore_tactic_kind_builtins = [
+    "TacAtom";
+    "TacDelay";
+    "interp_match_success";
+  ]
+  let toplevel_tactic_kind_builtins = [
+    "TacProgress";
+    "TacAbstract";
+    "TacThen";
+    "TacDispatch";
+    "TacExtendTac";
+    "TacThens";
+    "TacThens3parts";
+    "TacDo";
+    "TacTimeout";
+    "TacTime";
+    "TacTry";
+    "TacRepeat";
+    "TacOr";
+    "TacOnce";
+    "TacExactlyOnce";
+    "TacThenCatch";
+    "TacOrelse";
+    "TacFirst";
+    "TacSolve";
+    "TacSelect";
+    "TacId";
+    "TacFail";
+    "TacIntroPattern";
+    "TacApply";
+    "TacElim";
+    "TacCase";
+    "TacMutualFix";
+    "TacMutualCofix";
+    "TacAssert";
+    "TacGeneralize";
+    "TacLetTac";
+    "TacInductionDestruct";
+    "TacReduce";
+    "TacChange";
+    "TacRewrite";
+    "TacInversion";
+    "TacLetIn";
+    "TacMatchGoal";
+    "TacMatch";
+    "TacLetIn";
+    "TacMatchGoal";
+    "TacMatch";
+    "TacCall";
+  ]
+  let skip_tactic_kind_builtins = [
+    "TacFun";
+  ]
+  let arg_tactic_kind_builtins = [
+    "Reference";
+    "ConstrMayEval";
+    "TacFreshId";
+    "TacPretype";
+    "TacNumgoals";
+    "ArgVar";
+    "lift_constr_tac_to_ml_tac";
+    "delayed_open";
+    "int_or_var";
+    "nat_or_var";
+    "smart_global";
+    "ref";
+    "preident";
+    "ident";
+    "hyp";
+    "intropattern";
+    "simple_intropattern";
+    "clause_dft_concl";
+    "constr";
+    "uconstr";
+    "tacvalue";
+    "red_expr";
+    "quant_hyp";
+    "open_constr";
+    "bindings";
+    "constr_with_bindings";
+    "open_constr_with_bindings";
+    "destruction_arg";
+  ]
+  let rec process event =
+    let rec aux event =
+      match event with
+      | Tactic (_, _, Builtin (Ppcmd_string "TacCall"), _, Tactic (_, _, Builtin (Ppcmd_string "TacFun"), _, (Tactic (_, _, ML _, _, _) as c))) ->
+        aux c
+      | Tactic (_, _, Builtin (Ppcmd_string s), _, c)
+          when ignore_tactic_kind_builtins |> List.mem s ->
+        aux c
+      | Tactic (saved_proofview_before, saved_proofview_after, kind, _, Tactic (_, _, Builtin (Ppcmd_string t), m, c))
+          when arg_tactic_kind_builtins |> List.mem t ->
+        let event = Tactic (saved_proofview_before, saved_proofview_after, kind, m, c) in
+        aux event
+      | _ -> event in
+    let event = aux event in
+    match event with
+    | Sequence elements ->
+      Sequence (elements |> List.map process)
+    | Dispatch (saved_proofview_before, branches) ->
+      Dispatch (saved_proofview_before, branches |> List.map process)
+    | Tactic (saved_proofview_before, saved_proofview_after, kind, m, c) -> (
+      match kind with
+      | Primitive _ ->
+        c |> process
+      | Builtin (Ppcmd_string s) when toplevel_tactic_kind_builtins |> List.mem s ->
+        Tactic (saved_proofview_before, saved_proofview_after, kind, m, c |> process)
+      | Builtin (Ppcmd_string s) when skip_tactic_kind_builtins @ arg_tactic_kind_builtins |> List.mem s ->
+        c |> process
+      | Builtin (Ppcmd_string s) ->
+        failwith ("unhandled builtin: " ^ s)
+      | Builtin _ ->
+        assert false
+      | Alias _ ->
+        c |> process
+      | ML _ ->
+        Tactic (saved_proofview_before, saved_proofview_after, kind, m, c |> process)
+    )
+    | Message m -> Message m
+
+  let filter =
+    let open Util in
+    compress %> force_tactic_kinds %> process %> compress
 end
 
 module StateStore = Store.Make()

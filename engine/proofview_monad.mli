@@ -95,6 +95,8 @@ module Info : sig
       info trace, effectively forgetting about the [n] top level of
       names (if there are fewer, the last name is kept). *)
   val collapse : int -> trace -> trace
+
+  val filter : trace -> trace
 end
 
 module StateStore : Store.S

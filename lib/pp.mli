@@ -41,7 +41,6 @@ type pp_tag = string
 
 (* Following discussion on #390, we play on the safe side and make the
    internal representation opaque here. *)
-type t
 
 type block_type =
   | Pp_hbox
@@ -52,13 +51,15 @@ type block_type =
 type doc_view =
   | Ppcmd_empty
   | Ppcmd_string of string
-  | Ppcmd_glue of t list
-  | Ppcmd_box  of block_type * t
-  | Ppcmd_tag  of pp_tag * t
+  | Ppcmd_glue of doc_view list
+  | Ppcmd_box  of block_type * doc_view
+  | Ppcmd_tag  of pp_tag * doc_view
   (* Are those redundant? *)
   | Ppcmd_print_break of int * int
   | Ppcmd_force_newline
   | Ppcmd_comment of string list
+
+type t = doc_view
 
 val repr   : t -> doc_view
 val unrepr : doc_view -> t
